@@ -18,7 +18,7 @@ pytest -q                                        跑单元测试
 
 ```bash
 python -m course_vllm.server.api \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --dtype bfloat16 \
   --max-batch-size 8 \

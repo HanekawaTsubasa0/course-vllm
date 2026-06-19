@@ -13,7 +13,7 @@ from course_vllm.model.types import parse_dtype
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["forward", "decode", "batch-prefill", "batch-decode"])
-    parser.add_argument("--model", default="/home/wangqi/huggingface/Qwen3-0.6B")
+    parser.add_argument("--model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--prompt", default="Hello")
     parser.add_argument("--token-ids", default="21806,14582,15846")
     parser.add_argument("--batch-token-ids", default="9707,0,21806|9707,0,14582")

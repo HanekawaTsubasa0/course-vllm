@@ -7,7 +7,7 @@ from course_vllm import Engine, SamplingParams
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="/home/wangqi/huggingface/Qwen3-0.6B")
+    parser.add_argument("--model", default="Qwen/Qwen3-0.6B")
     parser.add_argument("--prompt", default="Hello, introduce yourself briefly.")
     parser.add_argument("--prompts", default="")
     parser.add_argument("--max-tokens", type=int, default=None, help="maximum generated tokens; omit for no explicit limit")

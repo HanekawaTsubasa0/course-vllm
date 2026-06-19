@@ -11,25 +11,18 @@
 - CUDA extension harness
 - RMSNorm、RoPE、softmax、matmul、paged attention decode 等教学 CUDA kernel
 
-主工程路径：
-
-```text
-/home/wangqi/llm_serving/course-vllm
-```
-
-开发计划文档：
-
-```text
-/home/wangqi/llm_serving/docs/course-vllm-development-plan.md
-```
+主工程路径就是当前仓库根目录。
 
 ## 环境配置
 
-进入项目并激活已有虚拟环境：
+进入项目并创建虚拟环境：
 
 ```bash
-cd /home/wangqi/llm_serving/course-vllm
+cd course-vllm
+python -m venv .venv
 source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
 当前环境主要依赖：
@@ -46,10 +39,16 @@ pytest
 ninja
 ```
 
-模型默认使用本机路径：
+脚本和服务默认使用公开模型 ID：
 
 ```text
-/home/wangqi/huggingface/Qwen3-0.6B
+Qwen/Qwen3-0.6B
+```
+
+如果本机已经有模型目录，直接用 `--model` 参数覆盖：
+
+```bash
+--model /path/to/Qwen3-0.6B
 ```
 
 ### CUDA 编译依赖
@@ -79,7 +78,7 @@ dependence/gcc14-root/usr/bin/x86_64-linux-gnu-g++-14
 
 ```bash
 python examples/offline_generate.py \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --chat \
   --prompt "用一句话介绍你自己。" \
@@ -90,7 +89,7 @@ python examples/offline_generate.py \
 
 ```bash
 python examples/offline_generate.py \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --chat \
   --prompt "用一句话介绍你自己。" \
@@ -104,7 +103,7 @@ python examples/offline_generate.py \
 
 ```bash
 python examples/offline_generate.py \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --prompts "Hello|What is KV cache?" \
   --max-tokens 64 \
@@ -126,11 +125,11 @@ python examples/block_usage.py \
 在第一个终端启动服务：
 
 ```bash
-cd /home/wangqi/llm_serving/course-vllm
+cd course-vllm
 source .venv/bin/activate
 
 python -m course_vllm.server.api \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --dtype bfloat16 \
   --max-batch-size 8 \
@@ -179,7 +178,7 @@ curl -s -N -X POST http://127.0.0.1:18080/v1/chat/completions \
 在另一个终端启动交互式 CLI：
 
 ```bash
-cd /home/wangqi/llm_serving/course-vllm
+cd course-vllm
 source .venv/bin/activate
 
 python examples/chat_client.py
@@ -267,21 +266,21 @@ pytest -q tests/test_kernels.py tests/test_attention.py -rs
 
 ```bash
 python validation/compare_qwen3.py forward \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --dtype float32
 
 python validation/compare_qwen3.py decode \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --dtype float32
 
 python validation/compare_qwen3.py batch-prefill \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --dtype float32
 
 python validation/compare_qwen3.py batch-decode \
-  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --model Qwen/Qwen3-0.6B \
   --backend paged \
   --dtype float32
 ```

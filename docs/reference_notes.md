@@ -1,6 +1,6 @@
 # Reference Notes
 
-This project uses the existing repositories in `/home/wangqi/llm_serving` as code references.
+This project uses local checkouts of several open-source repositories as design references.
 
 ## nano-vllm
 
