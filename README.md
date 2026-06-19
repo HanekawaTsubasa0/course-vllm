@@ -345,6 +345,13 @@ tests/
 
 docs/
   reference_notes.md    参考 nano-vllm、mini-sglang、llm.c、nanoGPT、tiny-llm 的阅读笔记
+  file_guide.md         每个文件的职责说明
+```
+
+更细的逐文件说明见：
+
+```text
+docs/file_guide.md
 ```
 
 ## 功能说明
