@@ -73,6 +73,9 @@ Reference for readable transformer code:
   enters the backend `decode_batch` interface. The continuous-cache Qwen3 backend executes same-length
   decode batches as one model forward; the paged backend still dispatches to the per-sequence reference
   path until true paged attention is added.
+- `course_vllm.server.batching.BatchingEngine` connects non-streaming HTTP requests to
+  `Engine.generate_batch` through an async queue and a short batching window. Streaming requests still
+  use the direct generator path until SSE scheduling is introduced.
 
 ## mini-sglang
 

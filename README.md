@@ -80,6 +80,8 @@ python examples/batch_generate.py \
 python -m course_vllm.server.api \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
   --backend paged \
+  --max-batch-size 8 \
+  --batch-wait-ms 2 \
   --port 18080
 ```
 
@@ -119,6 +121,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Continuous-cache Qwen3 backend supports true same-length batched decode.
 - Paged backend exposes `decode_batch` but currently keeps per-sequence reference execution.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
+- Non-streaming HTTP requests enter an async batching queue before `Engine.generate_batch`.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
 - Continuous KV cache skeleton and tests.
@@ -131,5 +134,6 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Replace paged backend dense readback with true paged attention.
 - Add padded or varlen prefill so mixed-length prompts can share one model forward.
 - Add true batched decode for paged KV storage.
-- Add continuous batching to the HTTP serving path.
+- Move HTTP batch execution to a dedicated worker thread or process.
+- Add streaming responses to the HTTP batching scheduler.
 - Add CUDA kernel harness and first kernels.
