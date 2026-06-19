@@ -146,6 +146,32 @@ def test_qwen3_backend_batch_prefill_buckets_mixed_lengths():
     assert out.past_key_values == [(1, 2), (3,), (4, 5), (6,)]
 
 
+def test_qwen3_backend_batch_decode_matches_single_decode():
+    backend = object.__new__(Qwen3TorchBackend)
+    backend.device = torch.device("cpu")
+    backend.model = Qwen3ForCausalLM(tiny_config()).eval()
+    backend.kv_cache = ContinuousKVCache()
+    backend._cache_ids = iter(range(20))
+    prompts = [[1, 2, 3], [4, 5, 6]]
+    prefill = backend.prefill_batch(prompts)
+
+    batch_out = backend.decode_batch([7, 8], prefill.past_key_values)
+
+    backend_single = object.__new__(Qwen3TorchBackend)
+    backend_single.device = torch.device("cpu")
+    backend_single.model = backend.model
+    backend_single.kv_cache = ContinuousKVCache()
+    backend_single._cache_ids = iter(range(100, 120))
+    single_prefill = [backend_single.prefill(prompt) for prompt in prompts]
+    single_out = [
+        backend_single.decode_step(token_id, prefill_out.past_key_values)
+        for token_id, prefill_out in zip([7, 8], single_prefill)
+    ]
+
+    for batch_logits, single in zip(batch_out.logits, single_out):
+        assert torch.allclose(batch_logits, single.logits)
+
+
 def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():
     backend = object.__new__(Qwen3PagedBackend)
     backend._cache_ids = iter([11])

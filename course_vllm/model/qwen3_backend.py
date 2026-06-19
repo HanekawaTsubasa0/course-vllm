@@ -107,13 +107,50 @@ class Qwen3TorchBackend:
         token_ids: list[int],
         past_key_values: list[object | None],
     ) -> BatchModelOutput:
-        outputs = [
-            self.decode_step(token_id, past_key_value)
-            for token_id, past_key_value in zip(token_ids, past_key_values)
+        if not token_ids:
+            return BatchModelOutput(logits=[], past_key_values=[])
+        outputs: list[ModelOutput | None] = [None] * len(token_ids)
+        for indices in self._bucket_decode_handles(past_key_values).values():
+            bucket_token_ids = [token_ids[index] for index in indices]
+            bucket_handles = [past_key_values[index] for index in indices]
+            bucket_out = self._decode_same_length_batch(bucket_token_ids, bucket_handles)
+            for index, bucket_index in enumerate(indices):
+                outputs[bucket_index] = ModelOutput(
+                    logits=bucket_out.logits[index],
+                    past_key_values=bucket_out.past_key_values[index],
+                )
+        if any(output is None for output in outputs):
+            raise RuntimeError("internal error: missing decode output")
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs if output is not None],
+            past_key_values=[
+                output.past_key_values
+                for output in outputs
+                if output is not None
+            ],
+        )
+
+    @torch.inference_mode()
+    def _decode_same_length_batch(
+        self,
+        token_ids: list[int],
+        past_key_values: list[object | None],
+    ) -> BatchModelOutput:
+        handles = [self._expect_handle(handle) for handle in past_key_values]
+        input_ids = torch.tensor([[token_id] for token_id in token_ids], dtype=torch.long, device=self.device)
+        cache = self._load_batch_cache(handles)
+        logits, cache = self.model.forward_with_cache(input_ids, past_key_values=cache)
+        new_handles = [
+            self._store_cache(
+                self._slice_cache(cache, batch_index),
+                seq_id=handle.seq_id,
+                append_from=handle.seq_len,
+            )
+            for batch_index, handle in enumerate(handles)
         ]
         return BatchModelOutput(
-            logits=[output.logits for output in outputs],
-            past_key_values=[output.past_key_values for output in outputs],
+            logits=[logits[batch_index, -1] for batch_index in range(len(token_ids))],
+            past_key_values=new_handles,
         )
 
     def release_cache(self, past_key_values: object | None) -> None:
@@ -143,6 +180,20 @@ class Qwen3TorchBackend:
             seq_len=handle.seq_len,
         )
 
+    def _load_batch_cache(self, handles: list[KVCacheHandle]) -> Qwen3KVCache:
+        if not handles:
+            raise ValueError("handles must not be empty")
+        seq_len = handles[0].seq_len
+        if any(handle.seq_len != seq_len for handle in handles):
+            raise ValueError("all handles must have the same seq_len")
+        per_seq = [self._load_cache(handle) for handle in handles]
+        key_values = []
+        for layer_id in range(len(per_seq[0].key_values)):
+            keys = [cache.key_values[layer_id][0] for cache in per_seq]
+            values = [cache.key_values[layer_id][1] for cache in per_seq]
+            key_values.append((torch.cat(keys, dim=0), torch.cat(values, dim=0)))
+        return Qwen3KVCache(key_values=key_values, seq_len=seq_len)
+
     def _slice_cache(self, cache: Qwen3KVCache, batch_index: int) -> Qwen3KVCache:
         return Qwen3KVCache(
             key_values=[
@@ -151,6 +202,18 @@ class Qwen3TorchBackend:
             ],
             seq_len=cache.seq_len,
         )
+
+    def _bucket_decode_handles(self, past_key_values: list[object | None]) -> dict[int, list[int]]:
+        buckets: dict[int, list[int]] = {}
+        for index, handle in enumerate(past_key_values):
+            kv_handle = self._expect_handle(handle)
+            buckets.setdefault(kv_handle.seq_len, []).append(index)
+        return buckets
+
+    def _expect_handle(self, handle: object | None) -> KVCacheHandle:
+        if not isinstance(handle, KVCacheHandle):
+            raise TypeError(f"expected KVCacheHandle, got {type(handle).__name__}")
+        return handle
 
 
 class Qwen3PagedBackend(Qwen3TorchBackend):
@@ -188,6 +251,21 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
     def release_cache(self, past_key_values: object | None) -> None:
         if isinstance(past_key_values, KVCacheHandle):
             self.kv_cache.release(past_key_values.seq_id)
+
+    @torch.inference_mode()
+    def decode_batch(
+        self,
+        token_ids: list[int],
+        past_key_values: list[object | None],
+    ) -> BatchModelOutput:
+        outputs = [
+            self.decode_step(token_id, past_key_value)
+            for token_id, past_key_value in zip(token_ids, past_key_values)
+        ]
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs],
+            past_key_values=[output.past_key_values for output in outputs],
+        )
 
     def _store_cache(
         self,

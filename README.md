@@ -37,6 +37,7 @@ python examples/compare_qwen3_torch.py --model /home/wangqi/huggingface/Qwen3-0.
 python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
 python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 python examples/compare_qwen3_batch_prefill.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
+python examples/compare_qwen3_batch_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
 ```
 
 The comparison scripts default to `float32` and Hugging Face eager attention so
@@ -115,7 +116,8 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
 - Prefill requests are bucketed by prompt length; each same-length bucket is executed as a real model batch.
-- Decode batches use the backend `decode_batch` interface; current implementations keep per-sequence reference execution.
+- Continuous-cache Qwen3 backend supports true same-length batched decode.
+- Paged backend exposes `decode_batch` but currently keeps per-sequence reference execution.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
@@ -128,6 +130,6 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 
 - Replace paged backend dense readback with true paged attention.
 - Add padded or varlen prefill so mixed-length prompts can share one model forward.
-- Replace `decode_batch` fallback with true batched decode model execution.
+- Add true batched decode for paged KV storage.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

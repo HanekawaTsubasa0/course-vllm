@@ -70,8 +70,9 @@ Reference for readable transformer code:
   prefill priority and decode batches.
 - `Engine.generate_batch` now drives multiple requests through that scheduler, and backend prefill is
   bucketed by prompt length. Each same-length bucket is executed as one model forward; decode still
-  enters the backend `decode_batch` interface, whose current implementations dispatch to the per-sequence
-  reference path. This keeps behavior easy to verify before adding varlen prefill and true batched decode.
+  enters the backend `decode_batch` interface. The continuous-cache Qwen3 backend executes same-length
+  decode batches as one model forward; the paged backend still dispatches to the per-sequence reference
+  path until true paged attention is added.
 
 ## mini-sglang
 
