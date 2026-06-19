@@ -312,7 +312,9 @@ course_vllm/
   model/
     hf_backend.py       HuggingFace 参考 backend
     qwen3_torch.py      课程自有 Qwen3 PyTorch 模型实现
-    qwen3_backend.py    course / paged backend，prefill/decode/batch decode
+    qwen3_continuous_backend.py  course backend，连续 KV cache 的 prefill/decode/batch decode
+    qwen3_paged_backend.py       paged backend，paged KV cache 的 prefill/decode/batch decode
+    qwen3_backend.py             兼容导出 Qwen3TorchBackend / Qwen3PagedBackend
     attention.py        dense attention、paged attention reference、CUDA dispatch
     types.py            ModelOutput / BatchModelOutput
   server/
