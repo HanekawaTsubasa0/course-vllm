@@ -123,6 +123,22 @@ Interactive client:
 python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 ```
 
+One-shot client call:
+
+```bash
+python examples/chat_client.py \
+  --url http://127.0.0.1:18080/v1/chat/completions \
+  --once "用一句话介绍你自己。" \
+  --max-tokens 32 \
+  --temperature 0
+```
+
+Multiple terminals can run `examples/chat_client.py` against the same server.
+Non-streaming requests enter the server batching queue and can be grouped when
+their sampling parameters match. Streaming requests are accepted from multiple
+clients too, but model execution is serialized through the single model worker
+in this teaching implementation.
+
 Server benchmark:
 
 ```bash
