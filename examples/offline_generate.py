@@ -9,6 +9,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="/home/wangqi/huggingface/Qwen3-0.6B")
     parser.add_argument("--prompt", default="Hello, introduce yourself briefly.")
+    parser.add_argument("--prompts", default="")
     parser.add_argument("--max-tokens", type=int, default=64)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--dtype", default="bfloat16")
@@ -18,6 +19,13 @@ def main() -> None:
 
     engine = Engine(args.model, dtype=args.dtype, backend=args.backend)
     params = SamplingParams(max_tokens=args.max_tokens, temperature=args.temperature)
+    if args.prompts:
+        prompts = [prompt for prompt in args.prompts.split("|") if prompt]
+        results = engine.generate_batch(prompts, params)
+        for prompt, result in zip(prompts, results):
+            print(f"prompt={prompt!r}")
+            print(result["text"])
+        return
     if args.chat:
         result = engine.chat([{"role": "user", "content": args.prompt}], params)
     else:

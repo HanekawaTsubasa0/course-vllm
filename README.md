@@ -33,12 +33,10 @@ pytest -q
 ## Model Alignment Checks
 
 ```bash
-python examples/compare_qwen3_torch.py --model /home/wangqi/huggingface/Qwen3-0.6B
-python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
-python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
-python examples/compare_qwen3_batch_prefill.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
-python examples/compare_qwen3_batch_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
-python examples/compare_qwen3_batch_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
+python validation/compare_qwen3.py forward --model /home/wangqi/huggingface/Qwen3-0.6B
+python validation/compare_qwen3.py decode --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
+python validation/compare_qwen3.py batch-prefill --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
+python validation/compare_qwen3.py batch-decode --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 ```
 
 The comparison scripts default to `float32` and Hugging Face eager attention so
@@ -67,7 +65,7 @@ python examples/block_usage.py --num-blocks 8 --block-size 4 --prompt-lens 3,6,9
 ## Offline Batch Generate
 
 ```bash
-python examples/batch_generate.py \
+python examples/offline_generate.py \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
   --backend paged \
   --prompts "Hello|What is KV cache?" \

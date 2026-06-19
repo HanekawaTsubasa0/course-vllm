@@ -51,9 +51,8 @@ Reference for readable transformer code:
 - `course_vllm.model.qwen3_torch` is the first course-owned model implementation.
 - It starts with an eager full-sequence PyTorch forward pass so RMSNorm, RoPE, grouped-query attention,
   MLP, residuals, and Hugging Face weight loading are explicit.
-- `examples/compare_qwen3_torch.py` checks the custom full forward pass against Hugging Face logits.
-- `examples/compare_qwen3_decode.py` checks prefill plus token-by-token KV decode against Hugging Face
-  eager attention.
+- `validation/compare_qwen3.py` checks full forward, KV decode, batch prefill, and batch decode against
+  Hugging Face eager attention.
 - `course_vllm.model.qwen3_backend.Qwen3TorchBackend` stores model KV tensors through
   `course_vllm.engine.kv_cache.ContinuousKVCache`, so the course cache abstraction is now on the
   serving path instead of being only a standalone exercise.
