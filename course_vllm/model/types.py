@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
 import torch
@@ -15,6 +16,13 @@ class ModelOutput:
 class BatchModelOutput:
     logits: list[torch.Tensor]
     past_key_values: list[object | None]
+
+
+def bucket_by_length(batch_token_ids: list[list[int]]) -> dict[int, list[int]]:
+    buckets: dict[int, list[int]] = defaultdict(list)
+    for index, token_ids in enumerate(batch_token_ids):
+        buckets[len(token_ids)].append(index)
+    return dict(buckets)
 
 
 def parse_dtype(dtype: str) -> torch.dtype:

@@ -11,6 +11,7 @@ from course_vllm.model.qwen3_torch import (
     apply_rotary_pos_emb,
     repeat_kv,
 )
+from course_vllm.model.types import BatchModelOutput
 
 
 def tiny_config() -> Qwen3Config:
@@ -121,6 +122,28 @@ def test_qwen3_backend_batch_prefill_matches_single_prefill():
     assert len(batch_out.logits) == 2
     for batch_logits, single in zip(batch_out.logits, single_out):
         assert torch.allclose(batch_logits, single.logits)
+
+
+def test_qwen3_backend_batch_prefill_buckets_mixed_lengths():
+    class SpyBackend(Qwen3TorchBackend):
+        def __init__(self):
+            self.calls = []
+
+        def _prefill_same_length_batch(self, batch_token_ids):
+            self.calls.append([list(token_ids) for token_ids in batch_token_ids])
+            logits = []
+            handles = []
+            for token_ids in batch_token_ids:
+                logits.append(torch.tensor([float(len(token_ids)), float(token_ids[-1])]))
+                handles.append(tuple(token_ids))
+            return BatchModelOutput(logits=logits, past_key_values=handles)
+
+    backend = SpyBackend()
+    out = backend.prefill_batch([[1, 2], [3], [4, 5], [6]])
+
+    assert backend.calls == [[[1, 2], [4, 5]], [[3], [6]]]
+    assert [logit.tolist() for logit in out.logits] == [[2.0, 2.0], [1.0, 3.0], [2.0, 5.0], [1.0, 6.0]]
+    assert out.past_key_values == [(1, 2), (3,), (4, 5), (6,)]
 
 
 def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():

@@ -50,9 +50,8 @@ def main() -> None:
         attn_implementation="eager",
     ).to(device)
     hf_model.eval()
-    input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=device)
+    same_length = len({len(token_ids) for token_ids in batch_token_ids}) == 1
     with torch.inference_mode():
-        hf_batch_logits = hf_model(input_ids=input_ids, use_cache=True).logits[:, -1].float().cpu()
         hf_single_logits = torch.stack([
             hf_model(
                 input_ids=torch.tensor([token_ids], dtype=torch.long, device=device),
@@ -60,11 +59,17 @@ def main() -> None:
             ).logits[0, -1].float().cpu()
             for token_ids in batch_token_ids
         ])
+        if same_length:
+            input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=device)
+            hf_batch_logits = hf_model(input_ids=input_ids, use_cache=True).logits[:, -1].float().cpu()
 
     report("course batch vs course single", course_batch_logits, course_single_logits)
-    report("hf batch vs hf single", hf_batch_logits, hf_single_logits)
-    report("course batch vs hf batch", course_batch_logits, hf_batch_logits)
     report("course single vs hf single", course_single_logits, hf_single_logits)
+    if same_length:
+        report("hf batch vs hf single", hf_batch_logits, hf_single_logits)
+        report("course batch vs hf batch", course_batch_logits, hf_batch_logits)
+    else:
+        report("course bucketed batch vs hf single", course_batch_logits, hf_single_logits)
 
 
 def report(name: str, lhs: torch.Tensor, rhs: torch.Tensor) -> None:

@@ -114,7 +114,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Greedy and temperature sampler.
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
-- Same-length prefill requests are executed as a real model batch; variable-length prefill currently falls back.
+- Prefill requests are bucketed by prompt length; each same-length bucket is executed as a real model batch.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
@@ -126,7 +126,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 ## Next Work
 
 - Replace paged backend dense readback with true paged attention.
-- Add padded or varlen prefill for mixed-length batches.
+- Add padded or varlen prefill so mixed-length prompts can share one model forward.
 - Add batched decode model execution.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

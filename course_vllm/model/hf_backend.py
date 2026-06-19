@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from course_vllm.model.types import BatchModelOutput, ModelOutput, parse_dtype
+from course_vllm.model.types import BatchModelOutput, ModelOutput, bucket_by_length, parse_dtype
 
 
 class HFModelBackend:
@@ -56,14 +56,23 @@ class HFModelBackend:
     def prefill_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
         if not batch_token_ids:
             return BatchModelOutput(logits=[], past_key_values=[])
-        seq_lens = {len(token_ids) for token_ids in batch_token_ids}
-        if len(seq_lens) != 1:
-            outputs = [self.prefill(token_ids) for token_ids in batch_token_ids]
-            return BatchModelOutput(
-                logits=[output.logits for output in outputs],
-                past_key_values=[output.past_key_values for output in outputs],
-            )
+        logits: list[torch.Tensor | None] = [None] * len(batch_token_ids)
+        past_key_values: list[object | None] = [None] * len(batch_token_ids)
+        for indices in bucket_by_length(batch_token_ids).values():
+            bucket_token_ids = [batch_token_ids[index] for index in indices]
+            bucket_out = self._prefill_same_length_batch(bucket_token_ids)
+            for index, bucket_index in enumerate(indices):
+                logits[bucket_index] = bucket_out.logits[index]
+                past_key_values[bucket_index] = bucket_out.past_key_values[index]
+        if any(item is None for item in logits):
+            raise RuntimeError("internal error: missing batch logits")
+        return BatchModelOutput(
+            logits=[item for item in logits if item is not None],
+            past_key_values=past_key_values,
+        )
 
+    @torch.inference_mode()
+    def _prefill_same_length_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
         input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=self.device)
         out = self.model(input_ids=input_ids, use_cache=True)
         return BatchModelOutput(
