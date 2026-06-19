@@ -46,6 +46,14 @@ Reference for readable transformer code:
 - `model.py`: manual causal attention fallback and simple block structure.
 - `model.py::generate`: minimal autoregressive generation loop.
 
+## Course Qwen3 Path
+
+- `course_vllm.model.qwen3_torch` is the first course-owned model implementation.
+- It starts with an eager full-sequence PyTorch forward pass so RMSNorm, RoPE, grouped-query attention,
+  MLP, residuals, and Hugging Face weight loading are explicit.
+- `examples/compare_qwen3_torch.py` checks the custom forward pass against Hugging Face logits before
+  KV-cache decoding and serving integration are added.
+
 ## mini-sglang
 
 Industrial comparison, not a direct base:

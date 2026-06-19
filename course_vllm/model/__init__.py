@@ -1,3 +1,4 @@
 from course_vllm.model.hf_backend import HFModelBackend
+from course_vllm.model.qwen3_torch import Qwen3ForCausalLM
 
-__all__ = ["HFModelBackend"]
+__all__ = ["HFModelBackend", "Qwen3ForCausalLM"]
