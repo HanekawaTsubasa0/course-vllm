@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
 
@@ -62,7 +62,7 @@ def create_app(
         params = _sampling_params(request.sampling_params)
         if request.stream:
             return StreamingResponse(
-                _sse(engine.generate_stream(request.prompt, params)),
+                _sse(batching_engine.stream(request.prompt, params)),
                 media_type="text/event-stream",
             )
         result = await batching_engine.generate(request.prompt, params)
@@ -73,8 +73,9 @@ def create_app(
         params = _sampling_params(request.sampling_params)
         messages = [message.model_dump() for message in request.messages]
         if request.stream:
+            prompt = engine.backend.apply_chat_template(messages)
             return StreamingResponse(
-                _sse(engine.chat_stream(messages, params)),
+                _sse(batching_engine.stream(prompt, params)),
                 media_type="text/event-stream",
             )
         prompt = engine.backend.apply_chat_template(messages)
@@ -93,8 +94,8 @@ def _sampling_params(params) -> SamplingParams:
     )
 
 
-def _sse(events: Iterator[dict]) -> Iterator[str]:
-    for event in events:
+async def _sse(events: AsyncIterator[dict]) -> AsyncIterator[str]:
+    async for event in events:
         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"
 

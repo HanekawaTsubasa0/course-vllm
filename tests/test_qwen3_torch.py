@@ -11,7 +11,6 @@ from course_vllm.model.qwen3_torch import (
     apply_rotary_pos_emb,
     repeat_kv,
 )
-from course_vllm.model.types import BatchModelOutput
 
 
 def tiny_config() -> Qwen3Config:
@@ -124,26 +123,27 @@ def test_qwen3_backend_batch_prefill_matches_single_prefill():
         assert torch.allclose(batch_logits, single.logits)
 
 
-def test_qwen3_backend_batch_prefill_buckets_mixed_lengths():
-    class SpyBackend(Qwen3TorchBackend):
-        def __init__(self):
-            self.calls = []
+def test_qwen3_backend_batch_prefill_handles_mixed_lengths_with_padding():
+    torch.manual_seed(0)
+    backend = object.__new__(Qwen3TorchBackend)
+    backend.device = torch.device("cpu")
+    backend.model = Qwen3ForCausalLM(tiny_config()).eval()
+    backend.kv_cache = ContinuousKVCache()
+    backend._cache_ids = iter(range(20))
+    backend.tokenizer = type("Tokenizer", (), {"pad_token_id": 0})()
 
-        def _prefill_same_length_batch(self, batch_token_ids):
-            self.calls.append([list(token_ids) for token_ids in batch_token_ids])
-            logits = []
-            handles = []
-            for token_ids in batch_token_ids:
-                logits.append(torch.tensor([float(len(token_ids)), float(token_ids[-1])]))
-                handles.append(tuple(token_ids))
-            return BatchModelOutput(logits=logits, past_key_values=handles)
+    batch = [[1, 2, 3], [4, 5]]
+    batch_out = backend.prefill_batch(batch)
+    backend_single = object.__new__(Qwen3TorchBackend)
+    backend_single.device = torch.device("cpu")
+    backend_single.model = backend.model
+    backend_single.kv_cache = ContinuousKVCache()
+    backend_single._cache_ids = iter(range(100, 120))
+    single_out = [backend_single.prefill(token_ids) for token_ids in batch]
 
-    backend = SpyBackend()
-    out = backend.prefill_batch([[1, 2], [3], [4, 5], [6]])
-
-    assert backend.calls == [[[1, 2], [4, 5]], [[3], [6]]]
-    assert [logit.tolist() for logit in out.logits] == [[2.0, 2.0], [1.0, 3.0], [2.0, 5.0], [1.0, 6.0]]
-    assert out.past_key_values == [(1, 2), (3,), (4, 5), (6,)]
+    for batch_logits, single in zip(batch_out.logits, single_out):
+        assert torch.allclose(batch_logits, single.logits, atol=1e-5, rtol=1e-5)
+    assert [handle.seq_len for handle in batch_out.past_key_values] == [3, 2]
 
 
 def test_qwen3_backend_batch_decode_matches_single_decode():

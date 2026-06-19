@@ -71,13 +71,11 @@ Reference for readable transformer code:
 - `course_vllm.engine.scheduler.Scheduler` implements the first waiting/running queue policy with
   prefill priority and decode batches.
 - `Engine.generate_batch` now drives multiple requests through that scheduler, and backend prefill is
-  bucketed by prompt length. Each same-length bucket is executed as one model forward; decode still
-  enters the backend `decode_batch` interface. The continuous-cache Qwen3 backend executes same-length
-  decode batches as one model forward; the paged backend uses PyTorch paged attention and can decode
-  a batch with mixed context lengths.
-- `course_vllm.server.batching.BatchingEngine` connects non-streaming HTTP requests to
-  `Engine.generate_batch` through an async queue and a short batching window. Streaming requests still
-  use the direct generator path until SSE scheduling is introduced.
+  executed as one padded model forward. Decode still enters the backend `decode_batch` interface.
+  The continuous-cache Qwen3 backend executes same-length decode batches as one model forward; the
+  paged backend uses PyTorch paged attention and can decode a batch with mixed context lengths.
+- `course_vllm.server.batching.BatchingEngine` connects HTTP requests to `Engine.generate_batch` and
+  `Engine.generate_stream` through an async queue plus a dedicated model worker thread.
 - `course_vllm.benchmarks.bench_server` is the first HTTP throughput/latency probe. It is intentionally
   simple so batching counters from `/health` can be compared with client-side request rates.
 

@@ -127,14 +127,16 @@ python -m course_vllm.benchmarks.bench_server \
 - Greedy and temperature sampler.
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
-- Prefill requests are bucketed by prompt length; each same-length bucket is executed as a real model batch.
+- Mixed-length prefill requests share one padded model forward.
 - Continuous-cache Qwen3 backend supports true same-length batched decode.
 - Paged backend supports `decode_batch` through PyTorch paged attention, including mixed context lengths.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
-- Non-streaming HTTP requests enter an async batching queue before `Engine.generate_batch`.
+- HTTP generation enters `BatchingEngine`; model work runs on a dedicated worker thread.
+- Streaming responses also run through `BatchingEngine.stream`.
 - `/health` reports batching counters such as total batches and observed batch size.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
+- Minimal CUDA kernel harness with a `vector_add` kernel exercise.
 - Continuous KV cache skeleton and tests.
 - Paged-KV-style block manager skeleton and tests.
 - Single-process prefill/decode scheduler skeleton and tests.
@@ -143,7 +145,4 @@ python -m course_vllm.benchmarks.bench_server \
 ## Next Work
 
 - Replace PyTorch `paged_attention_decode` with a CUDA or Triton kernel while keeping the same correctness tests.
-- Add padded or varlen prefill so mixed-length prompts can share one model forward.
-- Move HTTP batch execution to a dedicated worker thread or process.
-- Add streaming responses to the HTTP batching scheduler.
-- Add CUDA kernel harness and first kernels.
+- Add more CUDA teaching kernels such as RMSNorm, RoPE, softmax, and matmul.

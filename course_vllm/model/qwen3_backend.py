@@ -9,7 +9,7 @@ from course_vllm.engine.kv_cache import ContinuousKVCache, KVCacheHandle
 from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
 from course_vllm.model.attention import paged_attention_decode
 from course_vllm.model.qwen3_torch import Qwen3ForCausalLM, Qwen3KVCache, apply_rotary_pos_emb
-from course_vllm.model.types import BatchModelOutput, ModelOutput, bucket_by_length, parse_dtype
+from course_vllm.model.types import BatchModelOutput, ModelOutput, parse_dtype
 
 
 class Qwen3TorchBackend:
@@ -62,19 +62,20 @@ class Qwen3TorchBackend:
     def prefill_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
         if not batch_token_ids:
             return BatchModelOutput(logits=[], past_key_values=[])
-        logits: list[torch.Tensor | None] = [None] * len(batch_token_ids)
-        past_key_values: list[object | None] = [None] * len(batch_token_ids)
-        for indices in bucket_by_length(batch_token_ids).values():
-            bucket_token_ids = [batch_token_ids[index] for index in indices]
-            bucket_out = self._prefill_same_length_batch(bucket_token_ids)
-            for index, bucket_index in enumerate(indices):
-                logits[bucket_index] = bucket_out.logits[index]
-                past_key_values[bucket_index] = bucket_out.past_key_values[index]
-        if any(item is None for item in logits):
-            raise RuntimeError("internal error: missing batch logits")
+        lengths = [len(token_ids) for token_ids in batch_token_ids]
+        max_len = max(lengths)
+        pad_token_id = getattr(getattr(self, "tokenizer", None), "pad_token_id", 0) or 0
+        input_ids = torch.full((len(batch_token_ids), max_len), pad_token_id, dtype=torch.long, device=self.device)
+        for batch_index, token_ids in enumerate(batch_token_ids):
+            input_ids[batch_index, : len(token_ids)] = torch.tensor(token_ids, dtype=torch.long, device=self.device)
+        logits, cache = self.model.forward_with_cache(input_ids)
+        handles = [
+            self._store_cache(self._slice_cache(cache, batch_index, seq_len=length))
+            for batch_index, length in enumerate(lengths)
+        ]
         return BatchModelOutput(
-            logits=[item for item in logits if item is not None],
-            past_key_values=past_key_values,
+            logits=[logits[batch_index, length - 1] for batch_index, length in enumerate(lengths)],
+            past_key_values=handles,
         )
 
     @torch.inference_mode()
@@ -82,7 +83,7 @@ class Qwen3TorchBackend:
         input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=self.device)
         logits, cache = self.model.forward_with_cache(input_ids)
         handles = [
-            self._store_cache(self._slice_cache(cache, batch_index))
+            self._store_cache(self._slice_cache(cache, batch_index, seq_len=len(batch_token_ids[batch_index])))
             for batch_index in range(len(batch_token_ids))
         ]
         return BatchModelOutput(
@@ -195,13 +196,14 @@ class Qwen3TorchBackend:
             key_values.append((torch.cat(keys, dim=0), torch.cat(values, dim=0)))
         return Qwen3KVCache(key_values=key_values, seq_len=seq_len)
 
-    def _slice_cache(self, cache: Qwen3KVCache, batch_index: int) -> Qwen3KVCache:
+    def _slice_cache(self, cache: Qwen3KVCache, batch_index: int, seq_len: int | None = None) -> Qwen3KVCache:
+        seq_len = cache.seq_len if seq_len is None else seq_len
         return Qwen3KVCache(
             key_values=[
-                (key[batch_index : batch_index + 1], value[batch_index : batch_index + 1])
+                (key[batch_index : batch_index + 1, :, :seq_len], value[batch_index : batch_index + 1, :, :seq_len])
                 for key, value in cache.key_values
             ],
-            seq_len=cache.seq_len,
+            seq_len=seq_len,
         )
 
     def _bucket_decode_handles(self, past_key_values: list[object | None]) -> dict[int, list[int]]:

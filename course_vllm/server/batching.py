@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from dataclasses import dataclass
+from collections.abc import Callable, AsyncIterator
+import queue
+import threading
 
 from course_vllm.engine.engine import Engine
 from course_vllm.engine.sampler import SamplingParams
@@ -13,6 +16,14 @@ class _QueueItem:
     prompt: str
     sampling_params: SamplingParams
     future: asyncio.Future
+
+
+@dataclass(frozen=True, slots=True)
+class _ModelCall:
+    fn: Callable
+    args: tuple
+    kwargs: dict
+    result_queue: queue.Queue | None = None
 
 
 @dataclass(slots=True)
@@ -59,18 +70,26 @@ class BatchingEngine:
         self._queue: asyncio.Queue[_QueueItem | None] = asyncio.Queue()
         self._pending: deque[_QueueItem | None] = deque()
         self._worker: asyncio.Task | None = None
+        self._model_queue: queue.Queue[_ModelCall | None] = queue.Queue()
+        self._model_thread: threading.Thread | None = None
         self.stats = BatchingStats()
 
     async def start(self) -> None:
+        if self._model_thread is None:
+            self._model_thread = threading.Thread(target=self._run_model_worker, daemon=True)
+            self._model_thread.start()
         if self._worker is None:
             self._worker = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        if self._worker is None:
-            return
-        await self._queue.put(None)
-        await self._worker
-        self._worker = None
+        if self._worker is not None:
+            await self._queue.put(None)
+            await self._worker
+            self._worker = None
+        if self._model_thread is not None:
+            self._model_queue.put(None)
+            self._model_thread.join()
+            self._model_thread = None
 
     async def generate(self, prompt: str, sampling_params: SamplingParams) -> dict:
         await self.start()
@@ -78,6 +97,28 @@ class BatchingEngine:
         future = loop.create_future()
         await self._queue.put(_QueueItem(prompt=prompt, sampling_params=sampling_params, future=future))
         return await future
+
+    async def stream(self, prompt: str, sampling_params: SamplingParams) -> AsyncIterator[dict]:
+        await self.start()
+        events: queue.Queue[dict | BaseException | None] = queue.Queue()
+
+        def run_stream() -> None:
+            try:
+                for event in self.engine.generate_stream(prompt, sampling_params):
+                    events.put(event)
+            except BaseException as exc:
+                events.put(exc)
+            finally:
+                events.put(None)
+
+        self._model_queue.put(_ModelCall(fn=run_stream, args=(), kwargs={}))
+        while True:
+            event = await _async_queue_get(events)
+            if event is None:
+                return
+            if isinstance(event, BaseException):
+                raise event
+            yield event
 
     async def _run(self) -> None:
         while True:
@@ -109,7 +150,8 @@ class BatchingEngine:
         self.stats.total_batches += 1
         self.stats.max_observed_batch_size = max(self.stats.max_observed_batch_size, len(batch))
         try:
-            results = self.engine.generate_batch(
+            results = await self._run_model(
+                self.engine.generate_batch,
                 [item.prompt for item in batch],
                 batch[0].sampling_params,
                 max_num_seqs=self.max_batch_size,
@@ -136,3 +178,33 @@ class BatchingEngine:
 
     def stats_dict(self) -> dict:
         return self.stats.as_dict(queue_depth=self._queue.qsize() + len(self._pending))
+
+    async def _run_model(self, fn: Callable, *args, **kwargs):
+        result_queue: queue.Queue = queue.Queue(maxsize=1)
+        self._model_queue.put(_ModelCall(fn=fn, args=args, kwargs=kwargs, result_queue=result_queue))
+        status, value = await _async_queue_get(result_queue)
+        if status == "error":
+            raise value
+        return value
+
+    def _run_model_worker(self) -> None:
+        while True:
+            call = self._model_queue.get()
+            if call is None:
+                return
+            try:
+                result = call.fn(*call.args, **call.kwargs)
+            except BaseException as exc:
+                if call.result_queue is not None:
+                    call.result_queue.put(("error", exc))
+            else:
+                if call.result_queue is not None:
+                    call.result_queue.put(("ok", result))
+
+
+async def _async_queue_get(items: queue.Queue):
+    while True:
+        try:
+            return items.get_nowait()
+        except queue.Empty:
+            await asyncio.sleep(0.001)
