@@ -10,3 +10,4 @@ dist/
 .coverage
 htmlcov/
 *.log
+dependence/

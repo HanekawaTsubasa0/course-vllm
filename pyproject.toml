@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "ninja>=1.11",
     "pytest>=8",
 ]
 

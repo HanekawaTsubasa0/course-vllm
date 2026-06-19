@@ -29,6 +29,24 @@ The uv environment pins the CUDA-12-compatible stack verified on this server:
 pytest -q
 ```
 
+CUDA tests build PyTorch extensions with `ninja`. On this machine CUDA 12.8 is
+paired with a system `g++-15`, which is too new for nvcc's half/bfloat16 headers.
+Keep a local GCC 14 toolchain under `dependence/` instead of installing system
+packages:
+
+```bash
+mkdir -p dependence/debs dependence/gcc14-root
+cd dependence/debs
+apt download g++-14-x86-64-linux-gnu gcc-14-x86-64-linux-gnu cpp-14-x86-64-linux-gnu
+apt download libgcc-14-dev libstdc++-14-dev gcc-14-base
+cd ../..
+for deb in dependence/debs/*.deb; do dpkg-deb -x "$deb" dependence/gcc14-root; done
+```
+
+`course_vllm.kernels.harness` automatically uses
+`dependence/gcc14-root/usr/bin/x86_64-linux-gnu-g++-14` as nvcc's host compiler
+when it is present.
+
 ## Model Alignment Checks
 
 ```bash

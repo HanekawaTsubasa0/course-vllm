@@ -80,7 +80,7 @@ def cuda_paged_attention_decode(
 
 
 def _module():
-    return load_cuda_extension("course_vllm_cuda_ops", ("kernels/course_ops.cu",))
+    return load_cuda_extension("course_vllm_cuda_ops", ("kernels/course_ops.cpp", "kernels/course_ops.cu"))
 
 
 def _require_cuda(name: str, tensor: torch.Tensor) -> torch.Tensor:
