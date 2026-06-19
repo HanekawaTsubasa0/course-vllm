@@ -61,6 +61,17 @@ python examples/offline_generate.py \
 python examples/block_usage.py --num-blocks 8 --block-size 4 --prompt-lens 3,6,9 --decode-steps 2
 ```
 
+## Offline Batch Generate
+
+```bash
+python examples/batch_generate.py \
+  --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --backend paged \
+  --prompts "Hello|What is KV cache?" \
+  --max-tokens 16 \
+  --temperature 0
+```
+
 ## HTTP Server
 
 ```bash
@@ -101,6 +112,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - `paged` backend that stores KV in paged physical slots and reads dense KV back for reference attention.
 - Greedy and temperature sampler.
 - Offline generate example.
+- Offline `generate_batch` path driven by the prefill/decode scheduler.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
@@ -112,5 +124,6 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 ## Next Work
 
 - Replace paged backend dense readback with true paged attention.
+- Replace per-sequence batch execution with a true batched model runner.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

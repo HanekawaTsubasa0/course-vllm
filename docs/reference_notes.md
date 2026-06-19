@@ -64,6 +64,13 @@ Reference for readable transformer code:
   path. It still reads dense KV back into the PyTorch reference attention, which keeps Hugging Face
   alignment exact before introducing a true paged attention kernel.
 
+## Scheduling Path
+
+- `course_vllm.engine.scheduler.Scheduler` implements the first waiting/running queue policy with
+  prefill priority and decode batches.
+- `Engine.generate_batch` now drives multiple requests through that scheduler, but model execution is
+  still per sequence. This keeps behavior easy to verify before adding a true batched `ModelRunner`.
+
 ## mini-sglang
 
 Industrial comparison, not a direct base:

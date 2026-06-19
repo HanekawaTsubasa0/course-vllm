@@ -32,6 +32,9 @@ class Sequence:
     prompt_token_ids: list[int]
     generated_token_ids: list[int] = field(default_factory=list)
     status: RequestStatus = RequestStatus.WAITING
+    past_key_values: object | None = None
+    next_token_id: int | None = None
+    finish_reason: str | None = None
 
     @property
     def request_id(self) -> int:
