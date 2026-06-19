@@ -124,6 +124,7 @@ python -m course_vllm.benchmarks.bench_server \
 - Reusable `ContinuousKVCache` connected to the course Qwen3 backend.
 - Paged KV physical-slot storage with block tables and dense readback tests.
 - `paged` backend that stores KV in paged physical slots and reads dense KV back for reference attention.
+- PyTorch `paged_attention_decode` reference that reads directly from paged physical slots and matches dense attention.
 - Greedy and temperature sampler.
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
@@ -142,7 +143,7 @@ python -m course_vllm.benchmarks.bench_server \
 
 ## Next Work
 
-- Replace paged backend dense readback with true paged attention.
+- Connect the paged backend decode path to `paged_attention_decode`, then replace it with a CUDA kernel.
 - Add padded or varlen prefill so mixed-length prompts can share one model forward.
 - Add true batched decode for paged KV storage.
 - Move HTTP batch execution to a dedicated worker thread or process.
