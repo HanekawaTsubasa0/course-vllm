@@ -59,12 +59,16 @@ Reference for readable transformer code:
 - `course_vllm.engine.paged_kv_cache.PagedKVCache` is the first paged KV data layer: `BlockManager`
   owns block tables and slot mapping, while the cache stores per-layer physical-slot tensors and can
   read a sequence back as dense `[batch, heads, tokens, dim]` KV for correctness tests.
-- `course_vllm.model.attention.paged_attention_decode` is a slow PyTorch paged-attention reference:
-  it gathers physical slots through each sequence block table, repeats grouped-query KV heads, and
-  checks paged attention against dense attention in `tests/test_attention.py`.
+- `course_vllm.model.attention.paged_attention_decode` dispatches CUDA tensors to the course Triton
+  paged-attention decode kernel and keeps `paged_attention_decode_reference` as the readable PyTorch
+  oracle. The kernel reads physical slots through each sequence block table, handles grouped-query KV
+  heads, and is checked against dense attention when CUDA is visible.
 - `course_vllm.model.qwen3_backend.Qwen3PagedBackend` puts that paged storage on the real prefill/decode
   path. Its decode path writes each new token KV into physical slots, then reads prior context through
   `paged_attention_decode`; dense readback remains available for debug and correctness checks.
+- `course_vllm.kernels.triton_ops` contains compact teaching Triton kernels for RMSNorm, RoPE, row-wise
+  softmax, matmul, and paged decode attention. They are intentionally small and correctness-first; tests
+  skip cleanly on machines without CUDA.
 
 ## Scheduling Path
 
@@ -73,7 +77,7 @@ Reference for readable transformer code:
 - `Engine.generate_batch` now drives multiple requests through that scheduler, and backend prefill is
   executed as one padded model forward. Decode still enters the backend `decode_batch` interface.
   The continuous-cache Qwen3 backend executes same-length decode batches as one model forward; the
-  paged backend uses PyTorch paged attention and can decode a batch with mixed context lengths.
+  paged backend uses paged attention and can decode a batch with mixed context lengths.
 - `course_vllm.server.batching.BatchingEngine` connects HTTP requests to `Engine.generate_batch` and
   `Engine.generate_stream` through an async queue plus a dedicated model worker thread.
 - `course_vllm.benchmarks.bench_server` is the first HTTP throughput/latency probe. It is intentionally

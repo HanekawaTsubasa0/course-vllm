@@ -137,6 +137,8 @@ python -m course_vllm.benchmarks.bench_server \
 - SSE-style streaming responses.
 - Separate HTTP chat client.
 - Minimal CUDA kernel harness with a `vector_add` kernel exercise.
+- Triton paged-attention decode kernel for CUDA tensors, with the PyTorch reference kept as the CPU/fallback oracle.
+- Teaching Triton kernels for RMSNorm, RoPE, softmax, and matmul, each covered by CUDA-gated correctness tests.
 - Continuous KV cache skeleton and tests.
 - Paged-KV-style block manager skeleton and tests.
 - Single-process prefill/decode scheduler skeleton and tests.
@@ -144,5 +146,5 @@ python -m course_vllm.benchmarks.bench_server \
 
 ## Next Work
 
-- Replace PyTorch `paged_attention_decode` with a CUDA or Triton kernel while keeping the same correctness tests.
-- Add more CUDA teaching kernels such as RMSNorm, RoPE, softmax, and matmul.
+- Run the Triton kernel tests on a CUDA-visible machine and record benchmark numbers for paged attention and the teaching kernels.
+- Add a short profiler walkthrough for HTTP batching latency and decode throughput.

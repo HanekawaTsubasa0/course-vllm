@@ -3,6 +3,7 @@ import torch
 from torch.nn import functional as F
 
 from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
+from course_vllm.kernels import KernelUnavailable, triton_paged_attention_decode
 from course_vllm.model.attention import paged_attention_decode
 from course_vllm.model.qwen3_torch import repeat_kv
 
@@ -22,7 +23,7 @@ def _dense_decode_attention(
     return torch.matmul(weights.unsqueeze(1), value).squeeze(1)
 
 
-def _cache() -> PagedKVCache:
+def _cache(device: str | torch.device = "cpu") -> PagedKVCache:
     return PagedKVCache(
         PagedKVConfig(
             num_layers=1,
@@ -30,6 +31,7 @@ def _cache() -> PagedKVCache:
             block_size=3,
             num_kv_heads=2,
             head_dim=4,
+            device=device,
         )
     )
 
@@ -118,3 +120,42 @@ def test_paged_attention_decode_rejects_incomplete_block_table():
             context_lens=[4],
             block_size=cache.config.block_size,
         )
+
+
+def test_triton_paged_attention_decode_matches_dense_attention():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    torch.manual_seed(2)
+    cache = _cache(device="cuda")
+    seq_ids = [401, 402]
+    lengths = [4, 6]
+    dense_keys = []
+    dense_values = []
+    for seq_id, length in zip(seq_ids, lengths):
+        key = torch.randn(1, 2, length, 4, device="cuda")
+        value = torch.randn(1, 2, length, 4, device="cuda")
+        cache.allocate(seq_id=seq_id, num_tokens=0)
+        cache.append(seq_id=seq_id, layer_id=0, key=key, value=value)
+        dense_keys.append(key.squeeze(0))
+        dense_values.append(value.squeeze(0))
+
+    query = torch.randn(len(seq_ids), 4, 4, device="cuda")
+    try:
+        actual = triton_paged_attention_decode(
+            query=query,
+            key_cache=cache.key_cache[0],
+            value_cache=cache.value_cache[0],
+            block_tables=[cache.block_table(seq_id) for seq_id in seq_ids],
+            context_lens=lengths,
+            block_size=cache.config.block_size,
+        )
+    except KernelUnavailable as exc:
+        pytest.skip(str(exc))
+
+    expected = torch.stack(
+        [
+            _dense_decode_attention(query[index], dense_keys[index], dense_values[index])
+            for index in range(len(seq_ids))
+        ]
+    )
+    assert torch.allclose(actual, expected, atol=1e-5, rtol=1e-5)

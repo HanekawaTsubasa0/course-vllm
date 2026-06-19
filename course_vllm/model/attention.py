@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import torch
 from torch.nn import functional as F
 
+from course_vllm.kernels import KernelUnavailable
 from course_vllm.model.qwen3_torch import repeat_kv
 
 
@@ -18,10 +19,10 @@ def paged_attention_decode(
     *,
     scale: float | None = None,
 ) -> torch.Tensor:
-    """Reference decode attention over vLLM-style paged KV slots.
+    """Decode attention over vLLM-style paged KV slots.
 
-    This is intentionally simple PyTorch code. It is the correctness oracle for
-    later backend integration and CUDA kernels, not the fast implementation.
+    CUDA tensors use the course Triton kernel when available. CPU tensors, or
+    environments without Triton/CUDA, use the PyTorch reference path.
     """
 
     _validate_decode_inputs(
@@ -32,6 +33,44 @@ def paged_attention_decode(
         context_lens=context_lens,
         block_size=block_size,
     )
+    if query.is_cuda:
+        try:
+            from course_vllm.kernels.triton_ops import triton_paged_attention_decode
+
+            return triton_paged_attention_decode(
+                query=query,
+                key_cache=key_cache,
+                value_cache=value_cache,
+                block_tables=block_tables,
+                context_lens=context_lens,
+                block_size=block_size,
+                scale=scale,
+            )
+        except KernelUnavailable:
+            pass
+    return paged_attention_decode_reference(
+        query=query,
+        key_cache=key_cache,
+        value_cache=value_cache,
+        block_tables=block_tables,
+        context_lens=context_lens,
+        block_size=block_size,
+        scale=scale,
+    )
+
+
+def paged_attention_decode_reference(
+    query: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    block_tables: Sequence[Sequence[int]] | torch.Tensor,
+    context_lens: Sequence[int] | torch.Tensor,
+    block_size: int,
+    *,
+    scale: float | None = None,
+) -> torch.Tensor:
+    """Readable PyTorch correctness oracle for paged decode attention."""
+
     scale = query.shape[-1] ** -0.5 if scale is None else scale
 
     outputs = []

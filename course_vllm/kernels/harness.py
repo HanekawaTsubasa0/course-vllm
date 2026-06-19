@@ -27,9 +27,16 @@ def load_cuda_extension(name: str, sources: tuple[str, ...]):
         raise KernelUnavailable(str(exc)) from exc
 
 
-def assert_close(name: str, actual: torch.Tensor, expected: torch.Tensor, *, atol: float = 1e-6) -> None:
+def assert_close(
+    name: str,
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    *,
+    atol: float = 1e-6,
+    rtol: float = 0.0,
+) -> None:
     diff = (actual.float() - expected.float()).abs()
-    if not torch.allclose(actual, expected, atol=atol, rtol=0):
+    if not torch.allclose(actual, expected, atol=atol, rtol=rtol):
         raise AssertionError(f"{name}: max_abs_diff={diff.max().item():.6f}")
 
 
