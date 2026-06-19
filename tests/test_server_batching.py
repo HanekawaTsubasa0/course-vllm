@@ -38,6 +38,9 @@ async def _test_batching_engine_groups_matching_sampling_params():
     assert second["text"] == "B"
     assert len(engine.calls) == 1
     assert engine.calls[0][0] == ["a", "b"]
+    assert batching.stats_dict()["total_requests"] == 2
+    assert batching.stats_dict()["total_batches"] == 1
+    assert batching.stats_dict()["max_observed_batch_size"] == 2
 
 
 def test_batching_engine_separates_different_sampling_params():
@@ -56,3 +59,4 @@ async def _test_batching_engine_separates_different_sampling_params():
     assert first["text"] == "A"
     assert second["text"] == "B"
     assert [call[0] for call in engine.calls] == [["a"], ["b"]]
+    assert batching.stats_dict()["total_batches"] == 2

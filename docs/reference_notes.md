@@ -76,6 +76,8 @@ Reference for readable transformer code:
 - `course_vllm.server.batching.BatchingEngine` connects non-streaming HTTP requests to
   `Engine.generate_batch` through an async queue and a short batching window. Streaming requests still
   use the direct generator path until SSE scheduling is introduced.
+- `course_vllm.benchmarks.bench_server` is the first HTTP throughput/latency probe. It is intentionally
+  simple so batching counters from `/health` can be compared with client-side request rates.
 
 ## mini-sglang
 

@@ -107,6 +107,16 @@ Interactive client:
 python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 ```
 
+Server benchmark:
+
+```bash
+python -m course_vllm.benchmarks.bench_server \
+  --url http://127.0.0.1:18080/generate \
+  --num-requests 16 \
+  --concurrency 4 \
+  --max-tokens 16
+```
+
 ## Implemented So Far
 
 - HuggingFace-backed model runner with explicit prefill/decode loop.
@@ -122,6 +132,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Paged backend exposes `decode_batch` but currently keeps per-sequence reference execution.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - Non-streaming HTTP requests enter an async batching queue before `Engine.generate_batch`.
+- `/health` reports batching counters such as total batches and observed batch size.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
 - Continuous KV cache skeleton and tests.

@@ -15,6 +15,28 @@ class _QueueItem:
     future: asyncio.Future
 
 
+@dataclass(slots=True)
+class BatchingStats:
+    total_requests: int = 0
+    total_batches: int = 0
+    max_observed_batch_size: int = 0
+
+    @property
+    def average_batch_size(self) -> float:
+        if self.total_batches == 0:
+            return 0.0
+        return self.total_requests / self.total_batches
+
+    def as_dict(self, queue_depth: int) -> dict:
+        return {
+            "total_requests": self.total_requests,
+            "total_batches": self.total_batches,
+            "max_observed_batch_size": self.max_observed_batch_size,
+            "average_batch_size": self.average_batch_size,
+            "queue_depth": queue_depth,
+        }
+
+
 class BatchingEngine:
     """Async request queue that feeds non-streaming HTTP requests into Engine.generate_batch."""
 
@@ -37,6 +59,7 @@ class BatchingEngine:
         self._queue: asyncio.Queue[_QueueItem | None] = asyncio.Queue()
         self._pending: deque[_QueueItem | None] = deque()
         self._worker: asyncio.Task | None = None
+        self.stats = BatchingStats()
 
     async def start(self) -> None:
         if self._worker is None:
@@ -82,6 +105,9 @@ class BatchingEngine:
             batch.append(item)
 
     async def _process_batch(self, batch: list[_QueueItem]) -> None:
+        self.stats.total_requests += len(batch)
+        self.stats.total_batches += 1
+        self.stats.max_observed_batch_size = max(self.stats.max_observed_batch_size, len(batch))
         try:
             results = self.engine.generate_batch(
                 [item.prompt for item in batch],
@@ -107,3 +133,6 @@ class BatchingEngine:
         if self._pending:
             return self._pending.popleft()
         return self._queue.get_nowait()
+
+    def stats_dict(self) -> dict:
+        return self.stats.as_dict(queue_depth=self._queue.qsize() + len(self._pending))

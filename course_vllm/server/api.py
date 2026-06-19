@@ -54,6 +54,7 @@ def create_app(
             "model": model,
             "backend": backend,
             "max_batch_size": max_batch_size,
+            "batching": batching_engine.stats_dict(),
         }
 
     @app.post("/generate")
