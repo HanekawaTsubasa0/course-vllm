@@ -54,6 +54,12 @@ python examples/offline_generate.py \
   --temperature 0
 ```
 
+## Paged KV Debug
+
+```bash
+python examples/block_usage.py --num-blocks 8 --block-size 4 --prompt-lens 3,6,9 --decode-steps 2
+```
+
 ## HTTP Server
 
 ```bash
