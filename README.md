@@ -109,6 +109,10 @@ curl -s -X POST http://127.0.0.1:18080/generate \
   -d '{"prompt":"Hello","stream":false,"sampling_params":{"temperature":0,"max_tokens":16}}'
 ```
 
+If `max_tokens` is omitted or set to `null`, generation is not cut off by an
+explicit token limit and stops only on EOS or configured stop tokens. Examples
+use small `max_tokens` values to keep demos short.
+
 Streaming chat:
 
 ```bash

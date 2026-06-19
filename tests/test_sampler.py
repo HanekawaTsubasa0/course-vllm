@@ -13,3 +13,7 @@ def test_seeded_sampler_is_repeatable():
     first = Sampler(SamplingParams(temperature=1.0, seed=7)).sample(logits)
     second = Sampler(SamplingParams(temperature=1.0, seed=7)).sample(logits)
     assert first == second
+
+
+def test_sampling_params_allow_unbounded_generation():
+    assert SamplingParams().max_tokens is None

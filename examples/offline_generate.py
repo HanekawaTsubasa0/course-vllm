@@ -10,7 +10,7 @@ def main() -> None:
     parser.add_argument("--model", default="/home/wangqi/huggingface/Qwen3-0.6B")
     parser.add_argument("--prompt", default="Hello, introduce yourself briefly.")
     parser.add_argument("--prompts", default="")
-    parser.add_argument("--max-tokens", type=int, default=64)
+    parser.add_argument("--max-tokens", type=int, default=None, help="maximum generated tokens; omit for no explicit limit")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--dtype", default="bfloat16")
     parser.add_argument("--backend", default="hf", choices=["hf", "course", "paged"])

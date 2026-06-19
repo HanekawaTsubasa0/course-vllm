@@ -59,6 +59,18 @@ class FakeBatchBackend(FakeBackend):
         )
 
 
+class FakeEosBackend(FakeBackend):
+    def prefill(self, token_ids: list[int]) -> ModelOutput:
+        logits = torch.zeros(128)
+        logits[ord("A")] = 1.0
+        return ModelOutput(logits=logits, past_key_values={})
+
+    def decode_step(self, token_id: int, past_key_values: dict) -> ModelOutput:
+        logits = torch.zeros(128)
+        logits[self.eos_token_id] = 1.0
+        return ModelOutput(logits=logits, past_key_values=past_key_values)
+
+
 def test_engine_generate_batch_uses_scheduler_for_multiple_prompts():
     engine = object.__new__(Engine)
     engine.backend = FakeBackend()
@@ -73,6 +85,17 @@ def test_engine_generate_batch_uses_scheduler_for_multiple_prompts():
 
     assert [result["text"] for result in results] == ["BCD", "CDE"]
     assert [result["finish_reason"] for result in results] == ["length", "length"]
+
+
+def test_engine_default_generation_stops_on_eos_without_token_limit():
+    engine = object.__new__(Engine)
+    engine.backend = FakeEosBackend()
+    engine.backend_name = "fake"
+
+    result = engine.generate("x", SamplingParams(temperature=0.0))
+
+    assert result["finish_reason"] == "eos"
+    assert result["token_ids"] == [ord("A"), 99]
 
 
 def test_engine_generate_batch_prefers_backend_prefill_batch():

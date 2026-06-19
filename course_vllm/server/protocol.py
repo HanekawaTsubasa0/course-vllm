@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class SamplingParamsRequest(BaseModel):
     temperature: float = 0.8
-    max_tokens: int = 64
+    max_tokens: int | None = None
     top_k: int | None = None
     seed: int | None = None
 

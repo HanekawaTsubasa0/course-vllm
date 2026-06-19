@@ -34,11 +34,13 @@ def test_chat_session_save_and_load(tmp_path):
 def test_chat_session_set_params():
     session = ChatSession(httpx.Client(), url="http://test/v1/chat/completions", config=ChatConfig())
     session.handle_command("/set max_tokens 4")
+    assert session.config.max_tokens == 4
+    session.handle_command("/set max_tokens none")
     session.handle_command("/set temperature 0")
     session.handle_command("/set top_k none")
     session.handle_command("/stream off")
 
-    assert session.config.max_tokens == 4
+    assert session.config.max_tokens is None
     assert session.config.temperature == 0
     assert session.config.top_k is None
     assert session.config.stream is False
@@ -51,6 +53,7 @@ def test_chat_session_non_stream_request_uses_chat_endpoint():
         requests.append(request)
         body = json.loads(request.content)
         assert body["stream"] is False
+        assert body["sampling_params"]["max_tokens"] is None
         assert body["messages"][-1] == {"role": "user", "content": "hello"}
         return httpx.Response(200, json={"text": "world", "token_ids": [1], "finish_reason": "length"})
 

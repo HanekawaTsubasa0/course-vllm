@@ -48,7 +48,8 @@ class Sequence:
         self.generated_token_ids.append(int(token_id))
 
     def reached_max_tokens(self) -> bool:
-        return len(self.generated_token_ids) >= self.request.sampling_params.max_tokens
+        max_tokens = self.request.sampling_params.max_tokens
+        return max_tokens is not None and len(self.generated_token_ids) >= max_tokens
 
     def finish(self) -> None:
         self.status = RequestStatus.FINISHED

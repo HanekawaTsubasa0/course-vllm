@@ -8,7 +8,7 @@ import torch
 @dataclass(slots=True)
 class SamplingParams:
     temperature: float = 0.8
-    max_tokens: int = 64
+    max_tokens: int | None = None
     top_k: int | None = None
     seed: int | None = None
     stop_token_ids: tuple[int, ...] = ()
@@ -16,7 +16,7 @@ class SamplingParams:
     def __post_init__(self) -> None:
         if self.temperature < 0:
             raise ValueError("temperature must be >= 0")
-        if self.max_tokens <= 0:
+        if self.max_tokens is not None and self.max_tokens <= 0:
             raise ValueError("max_tokens must be > 0")
         if self.top_k is not None and self.top_k <= 0:
             raise ValueError("top_k must be > 0 when provided")

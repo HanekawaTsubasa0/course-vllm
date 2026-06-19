@@ -16,7 +16,7 @@ DEFAULT_URL = "http://127.0.0.1:18080/v1/chat/completions"
 
 @dataclass
 class ChatConfig:
-    max_tokens: int = 128
+    max_tokens: int | None = None
     temperature: float = 0.6
     top_k: int | None = None
     stream: bool = True
@@ -191,7 +191,7 @@ class ChatSession:
             return
         name, value = args
         if name == "max_tokens":
-            self.config.max_tokens = max(1, int(value))
+            self.config.max_tokens = None if value.lower() in {"none", "null", "off"} else max(1, int(value))
         elif name == "temperature":
             self.config.temperature = max(0.0, float(value))
         elif name == "top_k":
@@ -215,7 +215,7 @@ class ChatSession:
                     "/help                 show commands",
                     "/health               show server health and batching counters",
                     "/params               show sampling parameters",
-                    "/set max_tokens 64    change max generated tokens",
+                    "/set max_tokens 64    set max generated tokens; use none/off for no limit",
                     "/set temperature 0    change temperature",
                     "/set top_k 40         change top-k; use none/off to disable",
                     "/stream on|off        enable or disable SSE streaming",
@@ -257,7 +257,7 @@ def _validate_messages(value: object) -> list[dict[str, str]]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=DEFAULT_URL)
-    parser.add_argument("--max-tokens", type=int, default=128)
+    parser.add_argument("--max-tokens", type=int, default=None, help="maximum generated tokens; omit for no explicit limit")
     parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--no-stream", action="store_true")
