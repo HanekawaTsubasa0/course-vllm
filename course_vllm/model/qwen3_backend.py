@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 from course_vllm.engine.kv_cache import ContinuousKVCache, KVCacheHandle
 from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
 from course_vllm.model.qwen3_torch import Qwen3ForCausalLM, Qwen3KVCache
-from course_vllm.model.types import ModelOutput, parse_dtype
+from course_vllm.model.types import BatchModelOutput, ModelOutput, parse_dtype
 
 
 class Qwen3TorchBackend:
@@ -58,6 +58,29 @@ class Qwen3TorchBackend:
         return ModelOutput(logits=logits[0, -1], past_key_values=handle)
 
     @torch.inference_mode()
+    def prefill_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
+        if not batch_token_ids:
+            return BatchModelOutput(logits=[], past_key_values=[])
+        seq_lens = {len(token_ids) for token_ids in batch_token_ids}
+        if len(seq_lens) != 1:
+            outputs = [self.prefill(token_ids) for token_ids in batch_token_ids]
+            return BatchModelOutput(
+                logits=[output.logits for output in outputs],
+                past_key_values=[output.past_key_values for output in outputs],
+            )
+
+        input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=self.device)
+        logits, cache = self.model.forward_with_cache(input_ids)
+        handles = [
+            self._store_cache(self._slice_cache(cache, batch_index))
+            for batch_index in range(len(batch_token_ids))
+        ]
+        return BatchModelOutput(
+            logits=[logits[batch_index, -1] for batch_index in range(len(batch_token_ids))],
+            past_key_values=handles,
+        )
+
+    @torch.inference_mode()
     def decode_step(self, token_id: int, past_key_values: KVCacheHandle) -> ModelOutput:
         input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.device)
         cache = self._load_cache(past_key_values)
@@ -94,6 +117,15 @@ class Qwen3TorchBackend:
         return Qwen3KVCache(
             key_values=[(layer.key, layer.value) for layer in layer_kvs],
             seq_len=handle.seq_len,
+        )
+
+    def _slice_cache(self, cache: Qwen3KVCache, batch_index: int) -> Qwen3KVCache:
+        return Qwen3KVCache(
+            key_values=[
+                (key[batch_index : batch_index + 1], value[batch_index : batch_index + 1])
+                for key, value in cache.key_values
+            ],
+            seq_len=cache.seq_len,
         )
 
 

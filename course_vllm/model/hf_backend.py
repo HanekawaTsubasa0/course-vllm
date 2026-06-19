@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from course_vllm.model.types import ModelOutput, parse_dtype
+from course_vllm.model.types import BatchModelOutput, ModelOutput, parse_dtype
 
 
 class HFModelBackend:
@@ -51,6 +51,34 @@ class HFModelBackend:
         input_ids = torch.tensor([token_ids], dtype=torch.long, device=self.device)
         out = self.model(input_ids=input_ids, use_cache=True)
         return ModelOutput(logits=out.logits[0, -1], past_key_values=out.past_key_values)
+
+    @torch.inference_mode()
+    def prefill_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
+        if not batch_token_ids:
+            return BatchModelOutput(logits=[], past_key_values=[])
+        seq_lens = {len(token_ids) for token_ids in batch_token_ids}
+        if len(seq_lens) != 1:
+            outputs = [self.prefill(token_ids) for token_ids in batch_token_ids]
+            return BatchModelOutput(
+                logits=[output.logits for output in outputs],
+                past_key_values=[output.past_key_values for output in outputs],
+            )
+
+        input_ids = torch.tensor(batch_token_ids, dtype=torch.long, device=self.device)
+        out = self.model(input_ids=input_ids, use_cache=True)
+        return BatchModelOutput(
+            logits=[out.logits[batch_index, -1] for batch_index in range(len(batch_token_ids))],
+            past_key_values=[
+                tuple(
+                    (
+                        key[batch_index : batch_index + 1],
+                        value[batch_index : batch_index + 1],
+                    )
+                    for key, value in out.past_key_values
+                )
+                for batch_index in range(len(batch_token_ids))
+            ],
+        )
 
     @torch.inference_mode()
     def decode_step(self, token_id: int, past_key_values: object) -> ModelOutput:

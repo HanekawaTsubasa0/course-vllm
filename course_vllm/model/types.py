@@ -11,6 +11,12 @@ class ModelOutput:
     past_key_values: object | None
 
 
+@dataclass(slots=True)
+class BatchModelOutput:
+    logits: list[torch.Tensor]
+    past_key_values: list[object | None]
+
+
 def parse_dtype(dtype: str) -> torch.dtype:
     if dtype == "auto":
         return torch.bfloat16 if torch.cuda.is_available() else torch.float32

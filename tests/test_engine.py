@@ -2,7 +2,7 @@ import torch
 
 from course_vllm.engine.engine import Engine
 from course_vllm.engine.sampler import SamplingParams
-from course_vllm.model.types import ModelOutput
+from course_vllm.model.types import BatchModelOutput, ModelOutput
 
 
 class FakeBackend:
@@ -34,6 +34,19 @@ class FakeBackend:
             past_key_values["released"] = True
 
 
+class FakeBatchBackend(FakeBackend):
+    def __init__(self):
+        self.prefill_batch_calls = 0
+
+    def prefill_batch(self, batch_token_ids: list[list[int]]):
+        self.prefill_batch_calls += 1
+        outputs = [self.prefill(token_ids) for token_ids in batch_token_ids]
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs],
+            past_key_values=[output.past_key_values for output in outputs],
+        )
+
+
 def test_engine_generate_batch_uses_scheduler_for_multiple_prompts():
     engine = object.__new__(Engine)
     engine.backend = FakeBackend()
@@ -48,3 +61,18 @@ def test_engine_generate_batch_uses_scheduler_for_multiple_prompts():
 
     assert [result["text"] for result in results] == ["BCD", "CDE"]
     assert [result["finish_reason"] for result in results] == ["length", "length"]
+
+
+def test_engine_generate_batch_prefers_backend_prefill_batch():
+    engine = object.__new__(Engine)
+    engine.backend = FakeBatchBackend()
+    engine.backend_name = "fake"
+
+    engine.generate_batch(
+        ["x", "y"],
+        SamplingParams(temperature=0.0, max_tokens=1),
+        max_num_seqs=2,
+        max_num_batched_tokens=8,
+    )
+
+    assert engine.backend.prefill_batch_calls == 1

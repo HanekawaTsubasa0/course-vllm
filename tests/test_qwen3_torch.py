@@ -101,6 +101,28 @@ def test_qwen3_backend_stores_incremental_tokens_in_continuous_cache():
     assert torch.equal(restored_value, value)
 
 
+def test_qwen3_backend_batch_prefill_matches_single_prefill():
+    backend = object.__new__(Qwen3TorchBackend)
+    backend.device = torch.device("cpu")
+    backend.model = Qwen3ForCausalLM(tiny_config()).eval()
+    backend.kv_cache = ContinuousKVCache()
+    backend._cache_ids = iter(range(10))
+
+    torch.manual_seed(0)
+    batch = [[1, 2, 3], [4, 5, 6]]
+    batch_out = backend.prefill_batch(batch)
+    backend_single = object.__new__(Qwen3TorchBackend)
+    backend_single.device = torch.device("cpu")
+    backend_single.model = backend.model
+    backend_single.kv_cache = ContinuousKVCache()
+    backend_single._cache_ids = iter(range(10, 20))
+    single_out = [backend_single.prefill(token_ids) for token_ids in batch]
+
+    assert len(batch_out.logits) == 2
+    for batch_logits, single in zip(batch_out.logits, single_out):
+        assert torch.allclose(batch_logits, single.logits)
+
+
 def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():
     backend = object.__new__(Qwen3PagedBackend)
     backend._cache_ids = iter([11])

@@ -7,6 +7,7 @@ from course_vllm.engine.sampler import Sampler, SamplingParams
 from course_vllm.engine.scheduler import BatchKind, Scheduler
 from course_vllm.model.hf_backend import HFModelBackend
 from course_vllm.model.qwen3_backend import Qwen3PagedBackend, Qwen3TorchBackend
+from course_vllm.model.types import ModelOutput
 
 
 class Engine:
@@ -79,8 +80,8 @@ class Engine:
                 if batch is None:
                     break
                 if batch.kind == BatchKind.PREFILL:
-                    for seq in batch.sequences:
-                        output = self.backend.prefill(seq.prompt_token_ids)
+                    outputs = self._prefill_batch(batch.sequences)
+                    for seq, output in zip(batch.sequences, outputs):
                         seq.past_key_values = output.past_key_values
                         seq.next_token_id = samplers[seq.request_id].sample(output.logits)
                 else:
@@ -191,6 +192,16 @@ class Engine:
     ) -> None:
         seq.append_token(token_id)
         seq.finish_reason = self._finish_reason(seq, token_id, sampling_params)
+
+    def _prefill_batch(self, seqs: list[Sequence]) -> list[object]:
+        prefill_batch = getattr(self.backend, "prefill_batch", None)
+        if prefill_batch is None:
+            return [self.backend.prefill(seq.prompt_token_ids) for seq in seqs]
+        output = prefill_batch([seq.prompt_token_ids for seq in seqs])
+        return [
+            ModelOutput(logits=logits, past_key_values=past_key_values)
+            for logits, past_key_values in zip(output.logits, output.past_key_values)
+        ]
 
     def _release_cache(self, past_key_values: object | None) -> None:
         release_cache = getattr(self.backend, "release_cache", None)
