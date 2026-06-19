@@ -14,7 +14,6 @@ dependencies = [
     "safetensors>=0.4",
     "torch==2.8.0",
     "transformers>=4.57,<4.58",
-    "triton==3.4.0",
     "uvicorn>=0.30",
 ]
 

@@ -3,8 +3,8 @@ import torch
 from torch.nn import functional as F
 
 from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
-from course_vllm.kernels import KernelUnavailable, triton_paged_attention_decode
-from course_vllm.model.attention import paged_attention_decode
+from course_vllm.kernels import KernelUnavailable, benchmark_cuda, cuda_paged_attention_decode
+from course_vllm.model.attention import paged_attention_decode, paged_attention_decode_reference
 from course_vllm.model.qwen3_torch import repeat_kv
 
 
@@ -122,7 +122,7 @@ def test_paged_attention_decode_rejects_incomplete_block_table():
         )
 
 
-def test_triton_paged_attention_decode_matches_dense_attention():
+def test_cuda_paged_attention_decode_matches_dense_attention():
     if not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
     torch.manual_seed(2)
@@ -141,7 +141,7 @@ def test_triton_paged_attention_decode_matches_dense_attention():
 
     query = torch.randn(len(seq_ids), 4, 4, device="cuda")
     try:
-        actual = triton_paged_attention_decode(
+        actual = cuda_paged_attention_decode(
             query=query,
             key_cache=cache.key_cache[0],
             value_cache=cache.value_cache[0],
@@ -159,3 +159,117 @@ def test_triton_paged_attention_decode_matches_dense_attention():
         ]
     )
     assert torch.allclose(actual, expected, atol=1e-5, rtol=1e-5)
+
+
+def test_cuda_paged_attention_decode_supports_bfloat16():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    if not torch.cuda.is_bf16_supported():
+        pytest.skip("bfloat16 is not supported")
+    torch.manual_seed(4)
+    cache = PagedKVCache(
+        PagedKVConfig(
+            num_layers=1,
+            num_blocks=16,
+            block_size=4,
+            num_kv_heads=2,
+            head_dim=16,
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+    )
+    seq_id = 501
+    length = 8
+    key = torch.randn(1, 2, length, 16, device="cuda", dtype=torch.bfloat16)
+    value = torch.randn(1, 2, length, 16, device="cuda", dtype=torch.bfloat16)
+    cache.allocate(seq_id=seq_id, num_tokens=0)
+    cache.append(seq_id=seq_id, layer_id=0, key=key, value=value)
+    query = torch.randn(1, 4, 16, device="cuda", dtype=torch.bfloat16)
+    try:
+        actual = cuda_paged_attention_decode(
+            query=query,
+            key_cache=cache.key_cache[0],
+            value_cache=cache.value_cache[0],
+            block_tables=[cache.block_table(seq_id)],
+            context_lens=[length],
+            block_size=cache.config.block_size,
+        )
+    except KernelUnavailable as exc:
+        pytest.skip(str(exc))
+    expected = _dense_decode_attention(query[0], key.squeeze(0), value.squeeze(0)).unsqueeze(0)
+    assert actual.dtype == torch.bfloat16
+    assert torch.allclose(actual.float(), expected.float(), atol=4e-3, rtol=4e-3)
+
+
+def test_cuda_paged_attention_decode_not_much_slower_than_reference():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    torch.manual_seed(3)
+    cache = PagedKVCache(
+        PagedKVConfig(
+            num_layers=1,
+            num_blocks=128,
+            block_size=16,
+            num_kv_heads=4,
+            head_dim=32,
+            device="cuda",
+        )
+    )
+    seq_ids = list(range(8))
+    lengths = [96, 80, 64, 112, 72, 88, 104, 56]
+    for seq_id, length in zip(seq_ids, lengths):
+        cache.allocate(seq_id=seq_id, num_tokens=0)
+        cache.append(
+            seq_id=seq_id,
+            layer_id=0,
+            key=torch.randn(1, 4, length, 32, device="cuda"),
+            value=torch.randn(1, 4, length, 32, device="cuda"),
+        )
+    query = torch.randn(len(seq_ids), 8, 32, device="cuda")
+    block_tables = [cache.block_table(seq_id) for seq_id in seq_ids]
+    try:
+        actual = cuda_paged_attention_decode(
+            query=query,
+            key_cache=cache.key_cache[0],
+            value_cache=cache.value_cache[0],
+            block_tables=block_tables,
+            context_lens=lengths,
+            block_size=cache.config.block_size,
+        )
+    except KernelUnavailable as exc:
+        pytest.skip(str(exc))
+    expected = paged_attention_decode_reference(
+        query=query,
+        key_cache=cache.key_cache[0],
+        value_cache=cache.value_cache[0],
+        block_tables=block_tables,
+        context_lens=lengths,
+        block_size=cache.config.block_size,
+    )
+    assert torch.allclose(actual, expected, atol=1e-5, rtol=1e-5)
+
+    cuda_ms = benchmark_cuda(
+        lambda: cuda_paged_attention_decode(
+            query=query,
+            key_cache=cache.key_cache[0],
+            value_cache=cache.value_cache[0],
+            block_tables=block_tables,
+            context_lens=lengths,
+            block_size=cache.config.block_size,
+        ),
+        warmup=3,
+        repeat=10,
+    )
+    torch_ms = benchmark_cuda(
+        lambda: paged_attention_decode_reference(
+            query=query,
+            key_cache=cache.key_cache[0],
+            value_cache=cache.value_cache[0],
+            block_tables=block_tables,
+            context_lens=lengths,
+            block_size=cache.config.block_size,
+        ),
+        warmup=3,
+        repeat=10,
+    )
+    assert cuda_ms < torch_ms * 3 + 0.05

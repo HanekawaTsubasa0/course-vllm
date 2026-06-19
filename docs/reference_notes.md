@@ -59,14 +59,14 @@ Reference for readable transformer code:
 - `course_vllm.engine.paged_kv_cache.PagedKVCache` is the first paged KV data layer: `BlockManager`
   owns block tables and slot mapping, while the cache stores per-layer physical-slot tensors and can
   read a sequence back as dense `[batch, heads, tokens, dim]` KV for correctness tests.
-- `course_vllm.model.attention.paged_attention_decode` dispatches CUDA tensors to the course Triton
+- `course_vllm.model.attention.paged_attention_decode` dispatches CUDA tensors to the course CUDA
   paged-attention decode kernel and keeps `paged_attention_decode_reference` as the readable PyTorch
   oracle. The kernel reads physical slots through each sequence block table, handles grouped-query KV
   heads, and is checked against dense attention when CUDA is visible.
 - `course_vllm.model.qwen3_backend.Qwen3PagedBackend` puts that paged storage on the real prefill/decode
   path. Its decode path writes each new token KV into physical slots, then reads prior context through
   `paged_attention_decode`; dense readback remains available for debug and correctness checks.
-- `course_vllm.kernels.triton_ops` contains compact teaching Triton kernels for RMSNorm, RoPE, row-wise
+- `course_vllm.kernels.cuda_ops` wraps compact handwritten CUDA kernels for RMSNorm, RoPE, row-wise
   softmax, matmul, and paged decode attention. They are intentionally small and correctness-first; tests
   skip cleanly on machines without CUDA.
 

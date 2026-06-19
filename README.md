@@ -21,7 +21,6 @@ source .venv/bin/activate
 The uv environment pins the CUDA-12-compatible stack verified on this server:
 
 - `torch==2.8.0`
-- `triton==3.4.0`
 - `transformers>=4.57,<4.58`
 
 ## Run Tests
@@ -129,7 +128,7 @@ python -m course_vllm.benchmarks.bench_server \
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
 - Mixed-length prefill requests share one padded model forward.
 - Continuous-cache Qwen3 backend supports true same-length batched decode.
-- Paged backend supports `decode_batch` through PyTorch paged attention, including mixed context lengths.
+- Paged backend supports `decode_batch` through CUDA paged attention when available, including mixed context lengths.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - HTTP generation enters `BatchingEngine`; model work runs on a dedicated worker thread.
 - Streaming responses also run through `BatchingEngine.stream`.
@@ -137,8 +136,8 @@ python -m course_vllm.benchmarks.bench_server \
 - SSE-style streaming responses.
 - Separate HTTP chat client.
 - Minimal CUDA kernel harness with a `vector_add` kernel exercise.
-- Triton paged-attention decode kernel for CUDA tensors, with the PyTorch reference kept as the CPU/fallback oracle.
-- Teaching Triton kernels for RMSNorm, RoPE, softmax, and matmul, each covered by CUDA-gated correctness tests.
+- CUDA paged-attention decode kernel for CUDA tensors, with the PyTorch reference kept as the CPU/fallback oracle.
+- Teaching CUDA kernels for RMSNorm, RoPE, softmax, and matmul, each covered by CUDA-gated correctness tests.
 - Continuous KV cache skeleton and tests.
 - Paged-KV-style block manager skeleton and tests.
 - Single-process prefill/decode scheduler skeleton and tests.
@@ -146,5 +145,5 @@ python -m course_vllm.benchmarks.bench_server \
 
 ## Next Work
 
-- Run the Triton kernel tests on a CUDA-visible machine and record benchmark numbers for paged attention and the teaching kernels.
+- Run the CUDA kernel tests on a CUDA-visible machine and record benchmark numbers for paged attention and the teaching kernels.
 - Add a short profiler walkthrough for HTTP batching latency and decode throughput.

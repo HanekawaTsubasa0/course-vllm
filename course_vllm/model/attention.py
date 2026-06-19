@@ -21,8 +21,8 @@ def paged_attention_decode(
 ) -> torch.Tensor:
     """Decode attention over vLLM-style paged KV slots.
 
-    CUDA tensors use the course Triton kernel when available. CPU tensors, or
-    environments without Triton/CUDA, use the PyTorch reference path.
+    CUDA tensors use the course CUDA extension when available. CPU tensors, or
+    environments without a buildable CUDA extension, use the PyTorch reference path.
     """
 
     _validate_decode_inputs(
@@ -35,9 +35,9 @@ def paged_attention_decode(
     )
     if query.is_cuda:
         try:
-            from course_vllm.kernels.triton_ops import triton_paged_attention_decode
+            from course_vllm.kernels.cuda_ops import cuda_paged_attention_decode
 
-            return triton_paged_attention_decode(
+            return cuda_paged_attention_decode(
                 query=query,
                 key_cache=key_cache,
                 value_cache=value_cache,
