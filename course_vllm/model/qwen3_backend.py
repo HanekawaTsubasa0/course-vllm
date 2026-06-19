@@ -101,6 +101,21 @@ class Qwen3TorchBackend:
         )
         return ModelOutput(logits=logits[0, -1], past_key_values=handle)
 
+    @torch.inference_mode()
+    def decode_batch(
+        self,
+        token_ids: list[int],
+        past_key_values: list[object | None],
+    ) -> BatchModelOutput:
+        outputs = [
+            self.decode_step(token_id, past_key_value)
+            for token_id, past_key_value in zip(token_ids, past_key_values)
+        ]
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs],
+            past_key_values=[output.past_key_values for output in outputs],
+        )
+
     def release_cache(self, past_key_values: object | None) -> None:
         if isinstance(past_key_values, KVCacheHandle):
             self.kv_cache.release(past_key_values.seq_id)

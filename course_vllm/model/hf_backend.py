@@ -94,3 +94,18 @@ class HFModelBackend:
         input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.device)
         out = self.model(input_ids=input_ids, past_key_values=past_key_values, use_cache=True)
         return ModelOutput(logits=out.logits[0, -1], past_key_values=out.past_key_values)
+
+    @torch.inference_mode()
+    def decode_batch(
+        self,
+        token_ids: list[int],
+        past_key_values: list[object | None],
+    ) -> BatchModelOutput:
+        outputs = [
+            self.decode_step(token_id, past_key_value)
+            for token_id, past_key_value in zip(token_ids, past_key_values)
+        ]
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs],
+            past_key_values=[output.past_key_values for output in outputs],
+        )

@@ -115,6 +115,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
 - Prefill requests are bucketed by prompt length; each same-length bucket is executed as a real model batch.
+- Decode batches use the backend `decode_batch` interface; current implementations keep per-sequence reference execution.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - SSE-style streaming responses.
 - Separate HTTP chat client.
@@ -127,6 +128,6 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 
 - Replace paged backend dense readback with true paged attention.
 - Add padded or varlen prefill so mixed-length prompts can share one model forward.
-- Add batched decode model execution.
+- Replace `decode_batch` fallback with true batched decode model execution.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

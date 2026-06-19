@@ -85,6 +85,7 @@ class Engine:
                         seq.past_key_values = output.past_key_values
                         seq.next_token_id = samplers[seq.request_id].sample(output.logits)
                 else:
+                    decode_seqs = []
                     for seq in batch.sequences:
                         if seq.next_token_id is None:
                             raise RuntimeError("decode scheduled before prefill")
@@ -94,7 +95,9 @@ class Engine:
                             self._release_cache(seq.past_key_values)
                             seq.past_key_values = None
                             continue
-                        output = self.backend.decode_step(seq.next_token_id, seq.past_key_values)
+                        decode_seqs.append(seq)
+                    outputs = self._decode_batch(decode_seqs)
+                    for seq, output in zip(decode_seqs, outputs):
                         seq.past_key_values = output.past_key_values
                         seq.next_token_id = samplers[seq.request_id].sample(output.logits)
         finally:
@@ -198,6 +201,26 @@ class Engine:
         if prefill_batch is None:
             return [self.backend.prefill(seq.prompt_token_ids) for seq in seqs]
         output = prefill_batch([seq.prompt_token_ids for seq in seqs])
+        return [
+            ModelOutput(logits=logits, past_key_values=past_key_values)
+            for logits, past_key_values in zip(output.logits, output.past_key_values)
+        ]
+
+    def _decode_batch(self, seqs: list[Sequence]) -> list[ModelOutput]:
+        if not seqs:
+            return []
+        decode_batch = getattr(self.backend, "decode_batch", None)
+        if decode_batch is None:
+            return [
+                self.backend.decode_step(seq.next_token_id, seq.past_key_values)
+                for seq in seqs
+            ]
+        if any(seq.next_token_id is None for seq in seqs):
+            raise RuntimeError("decode scheduled before prefill")
+        output = decode_batch(
+            [seq.next_token_id for seq in seqs],
+            [seq.past_key_values for seq in seqs],
+        )
         return [
             ModelOutput(logits=logits, past_key_values=past_key_values)
             for logits, past_key_values in zip(output.logits, output.past_key_values)

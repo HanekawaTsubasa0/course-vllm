@@ -37,10 +37,22 @@ class FakeBackend:
 class FakeBatchBackend(FakeBackend):
     def __init__(self):
         self.prefill_batch_calls = 0
+        self.decode_batch_calls = 0
 
     def prefill_batch(self, batch_token_ids: list[list[int]]):
         self.prefill_batch_calls += 1
         outputs = [self.prefill(token_ids) for token_ids in batch_token_ids]
+        return BatchModelOutput(
+            logits=[output.logits for output in outputs],
+            past_key_values=[output.past_key_values for output in outputs],
+        )
+
+    def decode_batch(self, token_ids: list[int], past_key_values: list[dict]):
+        self.decode_batch_calls += 1
+        outputs = [
+            self.decode_step(token_id, past_key_value)
+            for token_id, past_key_value in zip(token_ids, past_key_values)
+        ]
         return BatchModelOutput(
             logits=[output.logits for output in outputs],
             past_key_values=[output.past_key_values for output in outputs],
@@ -76,3 +88,18 @@ def test_engine_generate_batch_prefers_backend_prefill_batch():
     )
 
     assert engine.backend.prefill_batch_calls == 1
+
+
+def test_engine_generate_batch_prefers_backend_decode_batch():
+    engine = object.__new__(Engine)
+    engine.backend = FakeBatchBackend()
+    engine.backend_name = "fake"
+
+    engine.generate_batch(
+        ["x", "y"],
+        SamplingParams(temperature=0.0, max_tokens=3),
+        max_num_seqs=2,
+        max_num_batched_tokens=8,
+    )
+
+    assert engine.backend.decode_batch_calls == 2
