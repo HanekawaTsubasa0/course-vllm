@@ -35,6 +35,7 @@ pytest -q
 ```bash
 python examples/compare_qwen3_torch.py --model /home/wangqi/huggingface/Qwen3-0.6B
 python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
+python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 ```
 
 The comparison scripts default to `float32` and Hugging Face eager attention so
@@ -47,7 +48,7 @@ logits, and KV-cache decode logits.
 ```bash
 python examples/offline_generate.py \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
-  --backend course \
+  --backend paged \
   --chat \
   --prompt "用一句话介绍你自己。" \
   --max-tokens 32 \
@@ -65,7 +66,7 @@ python examples/block_usage.py --num-blocks 8 --block-size 4 --prompt-lens 3,6,9
 ```bash
 python -m course_vllm.server.api \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
-  --backend course \
+  --backend paged \
   --port 18080
 ```
 
@@ -97,6 +98,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - Course-owned Qwen3 PyTorch runner with explicit prefill/decode KV cache.
 - Reusable `ContinuousKVCache` connected to the course Qwen3 backend.
 - Paged KV physical-slot storage with block tables and dense readback tests.
+- `paged` backend that stores KV in paged physical slots and reads dense KV back for reference attention.
 - Greedy and temperature sampler.
 - Offline generate example.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
@@ -109,7 +111,6 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 
 ## Next Work
 
-- Connect paged KV cache storage to a paged attention backend.
-- Add block usage and slot mapping debug output for examples.
+- Replace paged backend dense readback with true paged attention.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

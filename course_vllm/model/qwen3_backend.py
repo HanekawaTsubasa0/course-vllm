@@ -6,6 +6,7 @@ import torch
 from transformers import AutoTokenizer
 
 from course_vllm.engine.kv_cache import ContinuousKVCache, KVCacheHandle
+from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
 from course_vllm.model.qwen3_torch import Qwen3ForCausalLM, Qwen3KVCache
 from course_vllm.model.types import ModelOutput, parse_dtype
 
@@ -94,3 +95,68 @@ class Qwen3TorchBackend:
             key_values=[(layer.key, layer.value) for layer in layer_kvs],
             seq_len=handle.seq_len,
         )
+
+
+class Qwen3PagedBackend(Qwen3TorchBackend):
+    """Qwen3 runner that stores KV tensors in physical paged slots."""
+
+    def __init__(
+        self,
+        model_path: str,
+        *,
+        dtype: str = "bfloat16",
+        device: str | None = None,
+        trust_remote_code: bool = True,
+        num_blocks: int = 512,
+        block_size: int = 16,
+    ):
+        super().__init__(
+            model_path,
+            dtype=dtype,
+            device=device,
+            trust_remote_code=trust_remote_code,
+        )
+        config = self.model.config
+        self.kv_cache = PagedKVCache(
+            PagedKVConfig(
+                num_layers=config.num_hidden_layers,
+                num_blocks=num_blocks,
+                block_size=block_size,
+                num_kv_heads=config.num_key_value_heads,
+                head_dim=config.head_dim,
+                dtype=self.dtype,
+                device=self.device,
+            )
+        )
+
+    def release_cache(self, past_key_values: object | None) -> None:
+        if isinstance(past_key_values, KVCacheHandle):
+            self.kv_cache.release(past_key_values.seq_id)
+
+    def _store_cache(
+        self,
+        cache: Qwen3KVCache,
+        seq_id: int | None = None,
+        append_from: int = 0,
+    ) -> KVCacheHandle:
+        if seq_id is None:
+            seq_id = next(self._cache_ids)
+            self.kv_cache.allocate(seq_id=seq_id, num_tokens=0)
+        num_new_tokens = cache.seq_len - append_from
+        positions = self.kv_cache.reserve(seq_id=seq_id, num_new_tokens=num_new_tokens)
+        for layer_id, (key, value) in enumerate(cache.key_values):
+            self.kv_cache.write(
+                seq_id=seq_id,
+                layer_id=layer_id,
+                positions=positions,
+                key=key[:, :, append_from:, :],
+                value=value[:, :, append_from:, :],
+            )
+        return KVCacheHandle(seq_id=seq_id, seq_len=cache.seq_len)
+
+    def _load_cache(self, handle: KVCacheHandle) -> Qwen3KVCache:
+        key_values = [
+            self.kv_cache.get_dense(seq_id=handle.seq_id, layer_id=layer_id)
+            for layer_id in range(self.model.config.num_hidden_layers)
+        ]
+        return Qwen3KVCache(key_values=key_values, seq_len=handle.seq_len)

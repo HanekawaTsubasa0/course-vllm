@@ -1,7 +1,8 @@
 import torch
 
 from course_vllm.engine.kv_cache import ContinuousKVCache
-from course_vllm.model.qwen3_backend import Qwen3TorchBackend
+from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
+from course_vllm.model.qwen3_backend import Qwen3PagedBackend, Qwen3TorchBackend
 from course_vllm.model.qwen3_torch import (
     Qwen3Config,
     Qwen3ForCausalLM,
@@ -98,3 +99,51 @@ def test_qwen3_backend_stores_incremental_tokens_in_continuous_cache():
     assert restored.seq_len == 4
     assert torch.equal(restored_key, key)
     assert torch.equal(restored_value, value)
+
+
+def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():
+    backend = object.__new__(Qwen3PagedBackend)
+    backend._cache_ids = iter([11])
+    backend.model = Qwen3ForCausalLM(tiny_config())
+    backend.kv_cache = PagedKVCache(
+        PagedKVConfig(
+            num_layers=2,
+            num_blocks=4,
+            block_size=2,
+            num_kv_heads=2,
+            head_dim=4,
+        )
+    )
+    first_key = torch.arange(32, dtype=torch.float32).view(1, 2, 4, 4)
+    first_value = first_key + 100
+    second_key = first_key + 200
+    second_value = first_key + 300
+
+    handle = backend._store_cache(
+        Qwen3KVCache(
+            key_values=[
+                (first_key[:, :, :3], first_value[:, :, :3]),
+                (second_key[:, :, :3], second_value[:, :, :3]),
+            ],
+            seq_len=3,
+        )
+    )
+    assert backend.kv_cache.block_manager.tables[handle.seq_id].length == 3
+
+    handle = backend._store_cache(
+        Qwen3KVCache(
+            key_values=[
+                (first_key, first_value),
+                (second_key, second_value),
+            ],
+            seq_len=4,
+        ),
+        seq_id=handle.seq_id,
+        append_from=3,
+    )
+
+    restored = backend._load_cache(handle)
+    assert restored.seq_len == 4
+    assert backend.kv_cache.block_manager.tables[handle.seq_id].length == 4
+    assert torch.equal(restored.key_values[0][0], first_key)
+    assert torch.equal(restored.key_values[1][0], second_key)

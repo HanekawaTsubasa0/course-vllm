@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=64)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--dtype", default="bfloat16")
-    parser.add_argument("--backend", default="hf", choices=["hf", "course"])
+    parser.add_argument("--backend", default="hf", choices=["hf", "course", "paged"])
     parser.add_argument("--chat", action="store_true")
     args = parser.parse_args()
 

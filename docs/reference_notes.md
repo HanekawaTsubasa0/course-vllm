@@ -60,6 +60,9 @@ Reference for readable transformer code:
 - `course_vllm.engine.paged_kv_cache.PagedKVCache` is the first paged KV data layer: `BlockManager`
   owns block tables and slot mapping, while the cache stores per-layer physical-slot tensors and can
   read a sequence back as dense `[batch, heads, tokens, dim]` KV for correctness tests.
+- `course_vllm.model.qwen3_backend.Qwen3PagedBackend` puts that paged storage on the real prefill/decode
+  path. It still reads dense KV back into the PyTorch reference attention, which keeps Hugging Face
+  alignment exact before introducing a true paged attention kernel.
 
 ## mini-sglang
 

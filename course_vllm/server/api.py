@@ -80,7 +80,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dtype", default="bfloat16", choices=["auto", "float32", "float16", "bfloat16"])
     parser.add_argument("--device", default=None)
-    parser.add_argument("--backend", default="hf", choices=["hf", "course"])
+    parser.add_argument("--backend", default="hf", choices=["hf", "course", "paged"])
     args = parser.parse_args()
     app = create_app(args.model, dtype=args.dtype, device=args.device, backend=args.backend)
     uvicorn.run(app, host=args.host, port=args.port)

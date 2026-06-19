@@ -54,12 +54,18 @@ class PagedKVCache:
     ) -> None:
         self._validate_layer_id(layer_id)
         self._validate_kv(key, value)
+        positions = self.reserve(seq_id=seq_id, num_new_tokens=key.shape[-2])
+        self.write(seq_id=seq_id, layer_id=layer_id, positions=positions, key=key, value=value)
+
+    def reserve(self, seq_id: int, num_new_tokens: int) -> list[int]:
+        if num_new_tokens < 0:
+            raise ValueError("num_new_tokens must be >= 0")
         table = self.block_manager.tables[seq_id]
         old_length = table.length
-        num_new_tokens = key.shape[-2]
-        self.block_manager.ensure_capacity(seq_id, old_length + num_new_tokens)
-        positions = list(range(old_length, old_length + num_new_tokens))
-        self.write(seq_id=seq_id, layer_id=layer_id, positions=positions, key=key, value=value)
+        new_length = old_length + num_new_tokens
+        self.block_manager.ensure_capacity(seq_id, new_length)
+        table.length = new_length
+        return list(range(old_length, new_length))
 
     def write(
         self,

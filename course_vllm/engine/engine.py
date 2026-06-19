@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from course_vllm.engine.request import Request, Sequence
 from course_vllm.engine.sampler import Sampler, SamplingParams
 from course_vllm.model.hf_backend import HFModelBackend
-from course_vllm.model.qwen3_backend import Qwen3TorchBackend
+from course_vllm.model.qwen3_backend import Qwen3PagedBackend, Qwen3TorchBackend
 
 
 class Engine:
@@ -21,6 +21,8 @@ class Engine:
             self.backend = HFModelBackend(model, dtype=dtype, device=device)
         elif backend == "course":
             self.backend = Qwen3TorchBackend(model, dtype=dtype, device=device)
+        elif backend == "paged":
+            self.backend = Qwen3PagedBackend(model, dtype=dtype, device=device)
         else:
             raise ValueError(f"unsupported backend: {backend}")
         self.backend_name = backend
