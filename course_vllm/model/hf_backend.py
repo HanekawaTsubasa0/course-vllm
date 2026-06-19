@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
-@dataclass(slots=True)
-class ModelOutput:
-    logits: torch.Tensor
-    past_key_values: object | None
+from course_vllm.model.types import ModelOutput, parse_dtype
 
 
 class HFModelBackend:
@@ -25,7 +19,7 @@ class HFModelBackend:
     ):
         self.model_path = model_path
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.dtype = self._parse_dtype(dtype)
+        self.dtype = parse_dtype(dtype)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=trust_remote_code)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -38,18 +32,6 @@ class HFModelBackend:
         self.model.to(self.device)
         self.model.eval()
         self.eos_token_id = self.tokenizer.eos_token_id
-
-    def _parse_dtype(self, dtype: str) -> torch.dtype:
-        if dtype == "auto":
-            return torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        mapping = {
-            "float32": torch.float32,
-            "float16": torch.float16,
-            "bfloat16": torch.bfloat16,
-        }
-        if dtype not in mapping:
-            raise ValueError(f"unsupported dtype: {dtype}")
-        return mapping[dtype]
 
     def encode(self, prompt: str) -> list[int]:
         return self.tokenizer.encode(prompt, add_special_tokens=False)

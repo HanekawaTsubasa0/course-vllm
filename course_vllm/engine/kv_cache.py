@@ -5,6 +5,12 @@ from dataclasses import dataclass
 import torch
 
 
+@dataclass(frozen=True, slots=True)
+class KVCacheHandle:
+    seq_id: int
+    seq_len: int
+
+
 @dataclass(slots=True)
 class LayerKV:
     key: torch.Tensor
@@ -30,6 +36,10 @@ class ContinuousKVCache:
 
     def get(self, seq_id: int, layer_id: int) -> LayerKV:
         return self._cache[(seq_id, layer_id)]
+
+    def layers(self, seq_id: int) -> list[LayerKV]:
+        layer_ids = sorted(layer_id for item_seq_id, layer_id in self._cache if item_seq_id == seq_id)
+        return [self._cache[(seq_id, layer_id)] for layer_id in layer_ids]
 
     def contains(self, seq_id: int, layer_id: int) -> bool:
         return (seq_id, layer_id) in self._cache

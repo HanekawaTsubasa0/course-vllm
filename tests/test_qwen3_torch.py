@@ -1,8 +1,11 @@
 import torch
 
+from course_vllm.engine.kv_cache import ContinuousKVCache
+from course_vllm.model.qwen3_backend import Qwen3TorchBackend
 from course_vllm.model.qwen3_torch import (
     Qwen3Config,
     Qwen3ForCausalLM,
+    Qwen3KVCache,
     Qwen3RMSNorm,
     apply_rotary_pos_emb,
     repeat_kv,
@@ -55,3 +58,43 @@ def test_tiny_qwen3_forward_shape():
     input_ids = torch.tensor([[1, 2, 3]])
     logits = model(input_ids)
     assert logits.shape == (1, 3, 32)
+
+
+def test_tiny_qwen3_cache_matches_full_forward():
+    torch.manual_seed(0)
+    model = Qwen3ForCausalLM(tiny_config()).eval()
+    input_ids = torch.tensor([[1, 2, 3, 4]])
+    full_logits = model(input_ids)
+
+    logits, cache = model.forward_with_cache(input_ids[:, :2])
+    assert torch.allclose(logits[:, -1], full_logits[:, 1], atol=1e-5, rtol=1e-5)
+
+    logits, cache = model.forward_with_cache(input_ids[:, 2:3], past_key_values=cache)
+    assert torch.allclose(logits[:, -1], full_logits[:, 2], atol=1e-5, rtol=1e-5)
+
+    logits, _ = model.forward_with_cache(input_ids[:, 3:4], past_key_values=cache)
+    assert torch.allclose(logits[:, -1], full_logits[:, 3], atol=1e-5, rtol=1e-5)
+
+
+def test_qwen3_backend_stores_incremental_tokens_in_continuous_cache():
+    backend = object.__new__(Qwen3TorchBackend)
+    backend.kv_cache = ContinuousKVCache()
+    backend._cache_ids = iter([7])
+    key = torch.arange(4, dtype=torch.float32).view(1, 1, 4, 1)
+    value = key + 10
+
+    handle = backend._store_cache(Qwen3KVCache(key_values=[(key[:, :, :3], value[:, :, :3])], seq_len=3))
+    assert handle.seq_id == 7
+    assert handle.seq_len == 3
+
+    handle = backend._store_cache(
+        Qwen3KVCache(key_values=[(key, value)], seq_len=4),
+        seq_id=handle.seq_id,
+        append_from=3,
+    )
+
+    restored = backend._load_cache(handle)
+    restored_key, restored_value = restored.key_values[0]
+    assert restored.seq_len == 4
+    assert torch.equal(restored_key, key)
+    assert torch.equal(restored_value, value)

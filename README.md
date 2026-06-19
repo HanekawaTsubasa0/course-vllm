@@ -30,11 +30,24 @@ The uv environment pins the CUDA-12-compatible stack verified on this server:
 pytest -q
 ```
 
+## Model Alignment Checks
+
+```bash
+python examples/compare_qwen3_torch.py --model /home/wangqi/huggingface/Qwen3-0.6B
+python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
+```
+
+The comparison scripts default to `float32` and Hugging Face eager attention so
+the course implementation can be checked without fused-kernel numeric drift.
+Hugging Face is the numeric reference for tokenizer behavior, full-sequence
+logits, and KV-cache decode logits.
+
 ## Offline Generate
 
 ```bash
 python examples/offline_generate.py \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --backend course \
   --chat \
   --prompt "用一句话介绍你自己。" \
   --max-tokens 32 \
@@ -46,6 +59,7 @@ python examples/offline_generate.py \
 ```bash
 python -m course_vllm.server.api \
   --model /home/wangqi/huggingface/Qwen3-0.6B \
+  --backend course \
   --port 18080
 ```
 
@@ -74,6 +88,8 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 ## Implemented So Far
 
 - HuggingFace-backed model runner with explicit prefill/decode loop.
+- Course-owned Qwen3 PyTorch runner with explicit prefill/decode KV cache.
+- Reusable `ContinuousKVCache` connected to the course Qwen3 backend.
 - Greedy and temperature sampler.
 - Offline generate example.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
@@ -86,8 +102,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 
 ## Next Work
 
-- Replace the HuggingFace runner with a course-owned Qwen3 model path.
-- Connect continuous KV cache to the model runner.
 - Connect `BlockManager` to paged KV metadata and slot mapping.
+- Add paged KV cache storage behind the same prefill/decode contract.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.

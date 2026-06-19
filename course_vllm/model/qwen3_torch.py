@@ -44,6 +44,12 @@ class Qwen3Config:
         )
 
 
+@dataclass(slots=True)
+class Qwen3KVCache:
+    key_values: list[tuple[torch.Tensor, torch.Tensor]]
+    seq_len: int
+
+
 class Qwen3RMSNorm(nn.Module):
     def __init__(self, hidden_size: int, eps: float):
         super().__init__()
@@ -160,7 +166,10 @@ class Qwen3Attention(nn.Module):
         x: torch.Tensor,
         cos: torch.Tensor,
         sin: torch.Tensor,
-    ) -> torch.Tensor:
+        position_ids: torch.Tensor,
+        past_key_value: tuple[torch.Tensor, torch.Tensor] | None = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None]:
         batch_size, seq_len, _ = x.shape
         q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         k = self.k_proj(x).view(batch_size, seq_len, self.num_kv_heads, self.head_dim)
@@ -171,20 +180,25 @@ class Qwen3Attention(nn.Module):
         v = v.transpose(1, 2)
 
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        if past_key_value is not None:
+            past_k, past_v = past_key_value
+            k = torch.cat([past_k, k], dim=-2)
+            v = torch.cat([past_v, v], dim=-2)
+        present_key_value = (k, v) if use_cache else None
+
         k = repeat_kv(k, self.num_kv_groups)
         v = repeat_kv(v, self.num_kv_groups)
 
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scaling
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device),
-            diagonal=1,
-        )
+        key_len = k.shape[-2]
+        key_positions = torch.arange(key_len, dtype=position_ids.dtype, device=x.device)
+        causal_mask = key_positions.view(1, 1, 1, key_len) > position_ids.view(batch_size, 1, seq_len, 1)
         attn_scores = attn_scores.masked_fill(causal_mask, torch.finfo(attn_scores.dtype).min)
         attn_weights = F.softmax(attn_scores.float(), dim=-1).to(q.dtype)
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(batch_size, seq_len, self.num_heads * self.head_dim)
-        return self.o_proj(attn_output)
+        return self.o_proj(attn_output), present_key_value
 
 
 class Qwen3DecoderLayer(nn.Module):
@@ -200,16 +214,26 @@ class Qwen3DecoderLayer(nn.Module):
         x: torch.Tensor,
         cos: torch.Tensor,
         sin: torch.Tensor,
-    ) -> torch.Tensor:
+        position_ids: torch.Tensor,
+        past_key_value: tuple[torch.Tensor, torch.Tensor] | None = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None]:
         residual = x
         x = self.input_layernorm(x)
-        x = self.self_attn(x, cos, sin)
+        x, present_key_value = self.self_attn(
+            x,
+            cos,
+            sin,
+            position_ids,
+            past_key_value=past_key_value,
+            use_cache=use_cache,
+        )
         x = residual + x
 
         residual = x
         x = self.post_attention_layernorm(x)
         x = self.mlp(x)
-        return residual + x
+        return residual + x, present_key_value
 
 
 class Qwen3Model(nn.Module):
@@ -220,14 +244,40 @@ class Qwen3Model(nn.Module):
         self.norm = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = Qwen3RotaryEmbedding(config)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        past_key_values: Qwen3KVCache | None = None,
+        use_cache: bool = False,
+    ) -> tuple[torch.Tensor, Qwen3KVCache | None]:
         batch_size, seq_len = input_ids.shape
         hidden_states = self.embed_tokens(input_ids)
-        position_ids = torch.arange(seq_len, dtype=torch.long, device=input_ids.device).expand(batch_size, -1)
+        past_seq_len = past_key_values.seq_len if past_key_values is not None else 0
+        position_ids = torch.arange(
+            past_seq_len,
+            past_seq_len + seq_len,
+            dtype=torch.long,
+            device=input_ids.device,
+        ).expand(batch_size, -1)
         cos, sin = self.rotary_emb(hidden_states, position_ids)
-        for layer in self.layers:
-            hidden_states = layer(hidden_states, cos, sin)
-        return self.norm(hidden_states)
+        new_key_values: list[tuple[torch.Tensor, torch.Tensor]] = []
+        for layer_id, layer in enumerate(self.layers):
+            past_key_value = None
+            if past_key_values is not None:
+                past_key_value = past_key_values.key_values[layer_id]
+            hidden_states, present_key_value = layer(
+                hidden_states,
+                cos,
+                sin,
+                position_ids,
+                past_key_value=past_key_value,
+                use_cache=use_cache,
+            )
+            if present_key_value is not None:
+                new_key_values.append(present_key_value)
+
+        cache = Qwen3KVCache(key_values=new_key_values, seq_len=past_seq_len + seq_len) if use_cache else None
+        return self.norm(hidden_states), cache
 
 
 class Qwen3ForCausalLM(nn.Module):
@@ -263,5 +313,16 @@ class Qwen3ForCausalLM(nn.Module):
 
     @torch.inference_mode()
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.model(input_ids)
+        hidden_states, _ = self.model(input_ids)
         return self.lm_head(hidden_states)
+
+    @torch.inference_mode()
+    def forward_with_cache(
+        self,
+        input_ids: torch.Tensor,
+        past_key_values: Qwen3KVCache | None = None,
+    ) -> tuple[torch.Tensor, Qwen3KVCache]:
+        hidden_states, cache = self.model(input_ids, past_key_values=past_key_values, use_cache=True)
+        if cache is None:
+            raise RuntimeError("cache was not returned")
+        return self.lm_head(hidden_states), cache

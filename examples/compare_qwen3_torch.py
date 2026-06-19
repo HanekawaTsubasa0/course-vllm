@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument("--model", default="/home/wangqi/huggingface/Qwen3-0.6B")
     parser.add_argument("--prompt", default="Hello")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--dtype", default="float32")
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -44,6 +44,7 @@ def main() -> None:
         dtype=dtype,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
+        attn_implementation="eager",
     ).to(device)
     hf_model.eval()
     with torch.inference_mode():

@@ -17,14 +17,20 @@ from course_vllm.server.protocol import (
 )
 
 
-def create_app(model: str, *, dtype: str = "bfloat16", device: str | None = None) -> FastAPI:
+def create_app(
+    model: str,
+    *,
+    dtype: str = "bfloat16",
+    device: str | None = None,
+    backend: str = "hf",
+) -> FastAPI:
     app = FastAPI(title="course-vllm")
-    engine = Engine(model=model, dtype=dtype, device=device)
+    engine = Engine(model=model, dtype=dtype, device=device, backend=backend)
     app.state.engine = engine
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "model": model}
+        return {"status": "ok", "model": model, "backend": backend}
 
     @app.post("/generate")
     def generate(request: GenerateRequest):
@@ -74,8 +80,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dtype", default="bfloat16", choices=["auto", "float32", "float16", "bfloat16"])
     parser.add_argument("--device", default=None)
+    parser.add_argument("--backend", default="hf", choices=["hf", "course"])
     args = parser.parse_args()
-    app = create_app(args.model, dtype=args.dtype, device=args.device)
+    app = create_app(args.model, dtype=args.dtype, device=args.device, backend=args.backend)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

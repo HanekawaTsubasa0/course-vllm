@@ -24,3 +24,16 @@ def test_continuous_kv_cache_release_sequence():
     cache.append(1, 1, tensor, tensor)
     cache.release(1)
     assert cache.num_layers_for(1) == 0
+
+
+def test_continuous_kv_cache_returns_layers_in_layer_order():
+    cache = ContinuousKVCache()
+    layer_1 = torch.ones(1, 1, 1, 1)
+    layer_0 = torch.zeros(1, 1, 1, 1)
+
+    cache.append(seq_id=2, layer_id=1, key=layer_1, value=layer_1)
+    cache.append(seq_id=2, layer_id=0, key=layer_0, value=layer_0)
+
+    layers = cache.layers(seq_id=2)
+    assert torch.equal(layers[0].key, layer_0)
+    assert torch.equal(layers[1].key, layer_1)
