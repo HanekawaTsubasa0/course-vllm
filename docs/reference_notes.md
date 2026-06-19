@@ -57,6 +57,9 @@ Reference for readable transformer code:
 - `course_vllm.model.qwen3_backend.Qwen3TorchBackend` stores model KV tensors through
   `course_vllm.engine.kv_cache.ContinuousKVCache`, so the course cache abstraction is now on the
   serving path instead of being only a standalone exercise.
+- `course_vllm.engine.paged_kv_cache.PagedKVCache` is the first paged KV data layer: `BlockManager`
+  owns block tables and slot mapping, while the cache stores per-layer physical-slot tensors and can
+  read a sequence back as dense `[batch, heads, tokens, dim]` KV for correctness tests.
 
 ## mini-sglang
 

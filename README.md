@@ -90,6 +90,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 - HuggingFace-backed model runner with explicit prefill/decode loop.
 - Course-owned Qwen3 PyTorch runner with explicit prefill/decode KV cache.
 - Reusable `ContinuousKVCache` connected to the course Qwen3 backend.
+- Paged KV physical-slot storage with block tables and dense readback tests.
 - Greedy and temperature sampler.
 - Offline generate example.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
@@ -102,7 +103,7 @@ python examples/chat_client.py --url http://127.0.0.1:18080/v1/chat/completions
 
 ## Next Work
 
-- Connect `BlockManager` to paged KV metadata and slot mapping.
-- Add paged KV cache storage behind the same prefill/decode contract.
+- Connect paged KV cache storage to a paged attention backend.
+- Add block usage and slot mapping debug output for examples.
 - Add continuous batching to the HTTP serving path.
 - Add CUDA kernel harness and first kernels.
