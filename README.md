@@ -38,6 +38,7 @@ python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0
 python examples/compare_qwen3_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 python examples/compare_qwen3_batch_prefill.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 python examples/compare_qwen3_batch_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B
+python examples/compare_qwen3_batch_decode.py --model /home/wangqi/huggingface/Qwen3-0.6B --backend paged
 ```
 
 The comparison scripts default to `float32` and Hugging Face eager attention so
@@ -123,14 +124,14 @@ python -m course_vllm.benchmarks.bench_server \
 - Course-owned Qwen3 PyTorch runner with explicit prefill/decode KV cache.
 - Reusable `ContinuousKVCache` connected to the course Qwen3 backend.
 - Paged KV physical-slot storage with block tables and dense readback tests.
-- `paged` backend that stores KV in paged physical slots and reads dense KV back for reference attention.
 - PyTorch `paged_attention_decode` reference that reads directly from paged physical slots and matches dense attention.
+- `paged` backend decode path writes new KV to physical slots and reads prior context through block-table attention.
 - Greedy and temperature sampler.
 - Offline generate example.
 - Offline `generate_batch` path driven by the prefill/decode scheduler.
 - Prefill requests are bucketed by prompt length; each same-length bucket is executed as a real model batch.
 - Continuous-cache Qwen3 backend supports true same-length batched decode.
-- Paged backend exposes `decode_batch` but currently keeps per-sequence reference execution.
+- Paged backend supports `decode_batch` through PyTorch paged attention, including mixed context lengths.
 - FastAPI server with `/health`, `/generate`, and `/v1/chat/completions`.
 - Non-streaming HTTP requests enter an async batching queue before `Engine.generate_batch`.
 - `/health` reports batching counters such as total batches and observed batch size.
@@ -143,9 +144,8 @@ python -m course_vllm.benchmarks.bench_server \
 
 ## Next Work
 
-- Connect the paged backend decode path to `paged_attention_decode`, then replace it with a CUDA kernel.
+- Replace PyTorch `paged_attention_decode` with a CUDA or Triton kernel while keeping the same correctness tests.
 - Add padded or varlen prefill so mixed-length prompts can share one model forward.
-- Add true batched decode for paged KV storage.
 - Move HTTP batch execution to a dedicated worker thread or process.
 - Add streaming responses to the HTTP batching scheduler.
 - Add CUDA kernel harness and first kernels.

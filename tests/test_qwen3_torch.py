@@ -218,3 +218,47 @@ def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():
     assert backend.kv_cache.block_manager.tables[handle.seq_id].length == 4
     assert torch.equal(restored.key_values[0][0], first_key)
     assert torch.equal(restored.key_values[1][0], second_key)
+
+
+def test_qwen3_paged_backend_decode_matches_continuous_backend():
+    torch.manual_seed(0)
+    model = Qwen3ForCausalLM(tiny_config()).eval()
+    prompts = [[1, 2, 3], [4, 5]]
+    decode_tokens = [6, 7]
+
+    continuous = object.__new__(Qwen3TorchBackend)
+    continuous.device = torch.device("cpu")
+    continuous.model = model
+    continuous.kv_cache = ContinuousKVCache()
+    continuous._cache_ids = iter(range(10))
+    continuous_prefill = continuous.prefill_batch(prompts)
+    continuous_decode = continuous.decode_batch(decode_tokens, continuous_prefill.past_key_values)
+
+    paged = object.__new__(Qwen3PagedBackend)
+    paged.device = torch.device("cpu")
+    paged.model = model
+    paged.kv_cache = PagedKVCache(
+        PagedKVConfig(
+            num_layers=2,
+            num_blocks=16,
+            block_size=2,
+            num_kv_heads=2,
+            head_dim=4,
+        )
+    )
+    paged._cache_ids = iter(range(20))
+    paged_prefill = paged.prefill_batch(prompts)
+    paged_decode = paged.decode_batch(decode_tokens, paged_prefill.past_key_values)
+
+    for paged_logits, continuous_logits in zip(paged_decode.logits, continuous_decode.logits):
+        assert torch.allclose(paged_logits, continuous_logits, atol=1e-5, rtol=1e-5)
+    for handle in paged_decode.past_key_values:
+        assert paged.kv_cache.block_manager.tables[handle.seq_id].length == handle.seq_len
+
+    continuous_decode = continuous.decode_batch([8, 9], continuous_decode.past_key_values)
+    paged_decode = paged.decode_batch([8, 9], paged_decode.past_key_values)
+
+    for paged_logits, continuous_logits in zip(paged_decode.logits, continuous_decode.logits):
+        assert torch.allclose(paged_logits, continuous_logits, atol=1e-5, rtol=1e-5)
+    for handle in paged_decode.past_key_values:
+        assert paged.kv_cache.block_manager.tables[handle.seq_id].length == handle.seq_len

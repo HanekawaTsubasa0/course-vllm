@@ -64,8 +64,8 @@ Reference for readable transformer code:
   it gathers physical slots through each sequence block table, repeats grouped-query KV heads, and
   checks paged attention against dense attention in `tests/test_attention.py`.
 - `course_vllm.model.qwen3_backend.Qwen3PagedBackend` puts that paged storage on the real prefill/decode
-  path. It still reads dense KV back into the PyTorch reference attention, which keeps Hugging Face
-  alignment exact before introducing a true paged attention kernel.
+  path. Its decode path writes each new token KV into physical slots, then reads prior context through
+  `paged_attention_decode`; dense readback remains available for debug and correctness checks.
 
 ## Scheduling Path
 
@@ -74,8 +74,8 @@ Reference for readable transformer code:
 - `Engine.generate_batch` now drives multiple requests through that scheduler, and backend prefill is
   bucketed by prompt length. Each same-length bucket is executed as one model forward; decode still
   enters the backend `decode_batch` interface. The continuous-cache Qwen3 backend executes same-length
-  decode batches as one model forward; the paged backend still dispatches to the per-sequence reference
-  path until true paged attention is added.
+  decode batches as one model forward; the paged backend uses PyTorch paged attention and can decode
+  a batch with mixed context lengths.
 - `course_vllm.server.batching.BatchingEngine` connects non-streaming HTTP requests to
   `Engine.generate_batch` through an async queue and a short batching window. Streaming requests still
   use the direct generator path until SSE scheduling is introduced.

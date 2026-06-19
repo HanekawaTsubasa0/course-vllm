@@ -5,7 +5,7 @@ import argparse
 import torch
 from transformers import AutoModelForCausalLM
 
-from course_vllm.model.qwen3_backend import Qwen3TorchBackend
+from course_vllm.model.qwen3_backend import Qwen3PagedBackend, Qwen3TorchBackend
 from course_vllm.model.types import parse_dtype
 
 
@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--decode-token-ids", default="279,25")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", default="float32")
+    parser.add_argument("--backend", default="course", choices=["course", "paged"])
     args = parser.parse_args()
 
     prompt_token_ids = [
@@ -30,7 +31,8 @@ def main() -> None:
     device = torch.device(args.device)
     dtype = parse_dtype(args.dtype)
 
-    course = Qwen3TorchBackend(args.model, device=str(device), dtype=args.dtype)
+    backend_cls = Qwen3PagedBackend if args.backend == "paged" else Qwen3TorchBackend
+    course = backend_cls(args.model, device=str(device), dtype=args.dtype)
     course_prefill = course.prefill_batch(prompt_token_ids)
     course_decode = course.decode_batch(decode_token_ids, course_prefill.past_key_values)
     course_logits = torch.stack([logits.float().cpu() for logits in course_decode.logits])
