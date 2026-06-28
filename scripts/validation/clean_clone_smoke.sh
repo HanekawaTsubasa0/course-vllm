@@ -7,6 +7,23 @@ PORT="${PORT:-18180}"
 MODEL="${MODEL:-Qwen/Qwen3-0.6B}"
 export PORT
 
+if [[ -n "${PYTHON:-}" ]]; then
+  PYTHON_BIN="$PYTHON"
+else
+  PYTHON_BIN=""
+  for candidate in python3.12 python3.11 python3.10; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Could not find Python 3.10, 3.11, or 3.12. Set PYTHON=/path/to/python and retry." >&2
+  exit 2
+fi
+
 case "$WORKDIR" in
   /tmp/course-vllm-*|/tmp/*/course-vllm-*) ;;
   *)
@@ -27,7 +44,7 @@ mkdir -p "$WORKDIR"
 git clone "$REPO_ROOT" "$WORKDIR/repo"
 cd "$WORKDIR/repo"
 
-python3 -m venv .venv
+"$PYTHON_BIN" -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
