@@ -5,9 +5,11 @@ from collections.abc import Iterator
 from course_vllm.engine.request import Request, Sequence
 from course_vllm.engine.sampler import Sampler, SamplingParams
 from course_vllm.engine.scheduler import BatchKind, Scheduler
+from course_vllm.engine.policies import cache_aware_order
 from course_vllm.model.hf_backend import HFModelBackend
 from course_vllm.model.qwen3_backend import Qwen3PagedBackend, Qwen3TorchBackend
 from course_vllm.model.types import ModelOutput
+from course_vllm.stages import normalize_stage, stage_overview
 
 
 class Engine:
@@ -18,13 +20,35 @@ class Engine:
         dtype: str = "bfloat16",
         device: str | None = None,
         backend: str = "hf",
+        stage: str | int | None = None,
+        kernel_impl: str = "torch",
+        use_pinned_memory: bool = False,
+        use_transfer_stream: bool = False,
     ):
+        self.stage = normalize_stage(stage)
+        self.kernel_impl = kernel_impl
+        self.use_pinned_memory = use_pinned_memory
+        self.use_transfer_stream = use_transfer_stream
         if backend == "hf":
             self.backend = HFModelBackend(model, dtype=dtype, device=device)
         elif backend == "course":
-            self.backend = Qwen3TorchBackend(model, dtype=dtype, device=device)
+            self.backend = Qwen3TorchBackend(
+                model,
+                dtype=dtype,
+                device=device,
+                kernel_impl=kernel_impl,
+                use_pinned_memory=use_pinned_memory,
+                use_transfer_stream=use_transfer_stream,
+            )
         elif backend == "paged":
-            self.backend = Qwen3PagedBackend(model, dtype=dtype, device=device)
+            self.backend = Qwen3PagedBackend(
+                model,
+                dtype=dtype,
+                device=device,
+                kernel_impl=kernel_impl,
+                use_pinned_memory=use_pinned_memory,
+                use_transfer_stream=use_transfer_stream,
+            )
         else:
             raise ValueError(f"unsupported backend: {backend}")
         self.backend_name = backend
@@ -32,6 +56,18 @@ class Engine:
     @property
     def tokenizer(self):
         return self.backend.tokenizer
+
+    def info(self) -> dict:
+        return {
+            "backend": self.backend_name,
+            "stage": stage_overview(self.stage),
+            "kernel_impl": self.kernel_impl,
+            "model_backend": type(self.backend).__name__,
+            "system_optimizations": {
+                "pinned_memory": self.use_pinned_memory,
+                "transfer_stream": self.use_transfer_stream,
+            },
+        }
 
     def generate(self, prompt: str, sampling_params: SamplingParams | None = None) -> dict:
         sampling_params = sampling_params or SamplingParams()
@@ -56,21 +92,32 @@ class Engine:
         *,
         max_num_seqs: int = 8,
         max_num_batched_tokens: int = 2048,
+        enable_chunked_prefill: bool = False,
+        cache_aware_scheduling: bool = False,
     ) -> list[dict]:
         sampling_params = sampling_params or SamplingParams()
         scheduler = Scheduler(
             max_num_seqs=max_num_seqs,
             max_num_batched_tokens=max_num_batched_tokens,
+            enable_chunked_prefill=enable_chunked_prefill,
         )
         seqs: list[Sequence] = []
         samplers: dict[int, Sampler] = {}
-        for prompt in prompts:
+        encoded_prompts: list[tuple[int, str, list[int]]] = []
+        for index, prompt in enumerate(prompts):
             prompt_token_ids = self.backend.encode(prompt)
             if not prompt_token_ids:
                 raise ValueError("prompt encoded to an empty token sequence")
+            encoded_prompts.append((index, prompt, prompt_token_ids))
+        if cache_aware_scheduling:
+            order = cache_aware_order([tokens for _, _, tokens in encoded_prompts])
+            encoded_prompts = [encoded_prompts[index] for index in order]
+        original_index_by_request: dict[int, int] = {}
+        for original_index, prompt, prompt_token_ids in encoded_prompts:
             request = Request(prompt=prompt, sampling_params=sampling_params)
             seq = Sequence(request=request, prompt_token_ids=prompt_token_ids)
             seqs.append(seq)
+            original_index_by_request[seq.request_id] = original_index
             samplers[seq.request_id] = Sampler(sampling_params)
             scheduler.add(seq)
 
@@ -80,10 +127,12 @@ class Engine:
                 if batch is None:
                     break
                 if batch.kind == BatchKind.PREFILL:
-                    outputs = self._prefill_batch(batch.sequences)
+                    outputs = self._prefill_batch(batch.sequences, chunked=enable_chunked_prefill)
                     for seq, output in zip(batch.sequences, outputs):
                         seq.past_key_values = output.past_key_values
-                        seq.next_token_id = samplers[seq.request_id].sample(output.logits)
+                        seq.prefill_offset = seq.scheduled_end
+                        if seq.prefill_complete():
+                            seq.next_token_id = samplers[seq.request_id].sample(output.logits)
                 else:
                     decode_seqs = []
                     for seq in batch.sequences:
@@ -105,7 +154,7 @@ class Engine:
                 self._release_cache(seq.past_key_values)
                 seq.past_key_values = None
 
-        return [
+        ordered_results = [
             {
                 "text": self.backend.decode(seq.generated_token_ids),
                 "token_ids": seq.generated_token_ids,
@@ -113,6 +162,10 @@ class Engine:
             }
             for seq in seqs
         ]
+        results_by_original = [None] * len(ordered_results)
+        for seq, result in zip(seqs, ordered_results):
+            results_by_original[original_index_by_request[seq.request_id]] = result
+        return [result for result in results_by_original if result is not None]
 
     def generate_stream(
         self,
@@ -196,7 +249,9 @@ class Engine:
         seq.append_token(token_id)
         seq.finish_reason = self._finish_reason(seq, token_id, sampling_params)
 
-    def _prefill_batch(self, seqs: list[Sequence]) -> list[object]:
+    def _prefill_batch(self, seqs: list[Sequence], *, chunked: bool = False) -> list[object]:
+        if chunked:
+            return [self._prefill_chunk(seq) for seq in seqs]
         prefill_batch = getattr(self.backend, "prefill_batch", None)
         if prefill_batch is None:
             return [self.backend.prefill(seq.prompt_token_ids) for seq in seqs]
@@ -205,6 +260,17 @@ class Engine:
             ModelOutput(logits=logits, past_key_values=past_key_values)
             for logits, past_key_values in zip(output.logits, output.past_key_values)
         ]
+
+    def _prefill_chunk(self, seq: Sequence) -> ModelOutput:
+        tokens = seq.scheduled_prompt_tokens()
+        if not tokens:
+            raise RuntimeError("empty prefill chunk scheduled")
+        prefill_chunk = getattr(self.backend, "prefill_chunk", None)
+        if prefill_chunk is None:
+            if seq.scheduled_end != len(seq.prompt_token_ids):
+                raise RuntimeError("backend does not support chunked prefill")
+            return self.backend.prefill(seq.prompt_token_ids)
+        return prefill_chunk(tokens, seq.past_key_values)
 
     def _decode_batch(self, seqs: list[Sequence]) -> list[ModelOutput]:
         if not seqs:

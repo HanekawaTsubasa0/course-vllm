@@ -2,6 +2,8 @@ import asyncio
 import threading
 import time
 
+import pytest
+
 from course_vllm.engine.sampler import SamplingParams
 from course_vllm.server.batching import BatchingEngine
 
@@ -10,8 +12,8 @@ class FakeEngine:
     def __init__(self):
         self.calls = []
 
-    def generate_batch(self, prompts, sampling_params, *, max_num_seqs, max_num_batched_tokens):
-        self.calls.append((list(prompts), sampling_params, max_num_seqs, max_num_batched_tokens))
+    def generate_batch(self, prompts, sampling_params, *, max_num_seqs, max_num_batched_tokens, **kwargs):
+        self.calls.append((list(prompts), sampling_params, max_num_seqs, max_num_batched_tokens, dict(kwargs)))
         return [
             {
                 "text": prompt.upper(),
@@ -105,3 +107,50 @@ async def _test_batching_engine_stream_uses_model_worker():
     await batching.stop()
     assert [event["event"] for event in events] == ["token", "finished"]
     assert events[0]["text"] == "A"
+
+
+def test_batching_engine_rejects_long_prompt():
+    asyncio.run(_test_batching_engine_rejects_long_prompt())
+
+
+async def _test_batching_engine_rejects_long_prompt():
+    batching = BatchingEngine(FakeEngine(), max_prompt_chars=3)
+    with pytest.raises(ValueError):
+        await batching.generate("abcd", SamplingParams(max_tokens=1))
+    await batching.stop()
+
+
+def test_batching_engine_reports_admission_limits():
+    batching = BatchingEngine(
+        FakeEngine(),
+        max_queue_size=2,
+        max_prompt_chars=16,
+        enable_chunked_prefill=True,
+        cache_aware_scheduling=True,
+    )
+    stats = batching.stats_dict()
+    assert stats["max_queue_size"] == 2
+    assert stats["max_prompt_chars"] == 16
+    assert stats["enable_chunked_prefill"] is True
+    assert stats["cache_aware_scheduling"] is True
+
+
+def test_batching_engine_passes_scheduler_flags_to_engine():
+    asyncio.run(_test_batching_engine_passes_scheduler_flags_to_engine())
+
+
+async def _test_batching_engine_passes_scheduler_flags_to_engine():
+    engine = FakeEngine()
+    batching = BatchingEngine(
+        engine,
+        max_batch_size=2,
+        batch_wait_ms=0,
+        enable_chunked_prefill=True,
+        cache_aware_scheduling=True,
+    )
+
+    await batching.generate("a", SamplingParams(max_tokens=1))
+    await batching.stop()
+
+    assert engine.calls[0][4]["enable_chunked_prefill"] is True
+    assert engine.calls[0][4]["cache_aware_scheduling"] is True

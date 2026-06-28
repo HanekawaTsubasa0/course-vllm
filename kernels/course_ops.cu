@@ -119,6 +119,34 @@ __global__ void matmul_kernel(const scalar_t* a, const scalar_t* b, scalar_t* ou
   out[row * n + col] = from_float<scalar_t>(acc);
 }
 
+template <typename scalar_t, int Tile>
+__global__ void matmul_tiled_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, int m, int n, int k) {
+  __shared__ float tile_a[Tile][Tile];
+  __shared__ float tile_b[Tile][Tile];
+
+  int row = blockIdx.y * Tile + threadIdx.y;
+  int col = blockIdx.x * Tile + threadIdx.x;
+  float acc = 0.0f;
+
+  for (int start = 0; start < k; start += Tile) {
+    int a_col = start + threadIdx.x;
+    int b_row = start + threadIdx.y;
+    tile_a[threadIdx.y][threadIdx.x] = (row < m && a_col < k) ? to_float(a[row * k + a_col]) : 0.0f;
+    tile_b[threadIdx.y][threadIdx.x] = (b_row < k && col < n) ? to_float(b[b_row * n + col]) : 0.0f;
+    __syncthreads();
+
+    #pragma unroll
+    for (int offset = 0; offset < Tile; ++offset) {
+      acc += tile_a[threadIdx.y][offset] * tile_b[offset][threadIdx.x];
+    }
+    __syncthreads();
+  }
+
+  if (row < m && col < n) {
+    out[row * n + col] = from_float<scalar_t>(acc);
+  }
+}
+
 template <typename scalar_t>
 __global__ void paged_attention_decode_kernel(
     const scalar_t* query,
@@ -179,6 +207,103 @@ __global__ void paged_attention_decode_kernel(
 }
 
 template <typename scalar_t>
+__global__ void dense_attention_prefill_kernel(
+    const scalar_t* query,
+    const scalar_t* key,
+    const scalar_t* value,
+    scalar_t* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale) {
+  int batch = blockIdx.x;
+  int head = blockIdx.y;
+  int query_pos = blockIdx.z;
+  int dim = threadIdx.x;
+  if (batch >= batch_size || head >= num_heads || query_pos >= seq_len) return;
+
+  const scalar_t* q = query + ((batch * num_heads + head) * seq_len + query_pos) * head_dim;
+  __shared__ float shared[kThreads];
+  float max_score = -INFINITY;
+  float denom = 0.0f;
+  float acc = 0.0f;
+  for (int token = 0; token <= query_pos; ++token) {
+    const scalar_t* k = key + ((batch * num_heads + head) * seq_len + token) * head_dim;
+    const scalar_t* v = value + ((batch * num_heads + head) * seq_len + token) * head_dim;
+    float partial = dim < head_dim ? to_float(q[dim]) * to_float(k[dim]) : 0.0f;
+    shared[threadIdx.x] = partial;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
+      __syncthreads();
+    }
+
+    float score = shared[0] * scale;
+    float next_max = fmaxf(max_score, score);
+    float old_scale = expf(max_score - next_max);
+    float prob = expf(score - next_max);
+    if (dim < head_dim) {
+      acc = acc * old_scale + prob * to_float(v[dim]);
+    }
+    denom = denom * old_scale + prob;
+    max_score = next_max;
+    __syncthreads();
+  }
+  if (dim < head_dim) {
+    out[((batch * num_heads + head) * seq_len + query_pos) * head_dim + dim] = from_float<scalar_t>(acc / denom);
+  }
+}
+
+template <typename scalar_t>
+__global__ void dense_attention_decode_kernel(
+    const scalar_t* query,
+    const scalar_t* key,
+    const scalar_t* value,
+    scalar_t* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale) {
+  int batch = blockIdx.x;
+  int head = blockIdx.y;
+  int dim = threadIdx.x;
+  if (batch >= batch_size || head >= num_heads) return;
+
+  const scalar_t* q = query + ((batch * num_heads + head) * head_dim);
+  __shared__ float shared[kThreads];
+  float max_score = -INFINITY;
+  float denom = 0.0f;
+  float acc = 0.0f;
+  for (int token = 0; token < seq_len; ++token) {
+    const scalar_t* k = key + ((batch * num_heads + head) * seq_len + token) * head_dim;
+    const scalar_t* v = value + ((batch * num_heads + head) * seq_len + token) * head_dim;
+    float partial = dim < head_dim ? to_float(q[dim]) * to_float(k[dim]) : 0.0f;
+    shared[threadIdx.x] = partial;
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
+      __syncthreads();
+    }
+
+    float score = shared[0] * scale;
+    float next_max = fmaxf(max_score, score);
+    float old_scale = expf(max_score - next_max);
+    float prob = expf(score - next_max);
+    if (dim < head_dim) {
+      acc = acc * old_scale + prob * to_float(v[dim]);
+    }
+    denom = denom * old_scale + prob;
+    max_score = next_max;
+    __syncthreads();
+  }
+  if (dim < head_dim) {
+    out[(batch * num_heads + head) * head_dim + dim] = from_float<scalar_t>(acc / denom);
+  }
+}
+
+template <typename scalar_t>
 int launch_softmax(const void* x, void* out, int rows, int cols) {
   softmax_kernel<<<rows, kThreads>>>(static_cast<const scalar_t*>(x), static_cast<scalar_t*>(out), rows, cols);
   return static_cast<int>(cudaGetLastError());
@@ -202,6 +327,16 @@ int launch_matmul(const void* a, const void* b, void* out, int m, int n, int k) 
   dim3 block(16, 16);
   dim3 grid((n + block.x - 1) / block.x, (m + block.y - 1) / block.y);
   matmul_kernel<<<grid, block>>>(static_cast<const scalar_t*>(a), static_cast<const scalar_t*>(b), static_cast<scalar_t*>(out), m, n, k);
+  return static_cast<int>(cudaGetLastError());
+}
+
+template <typename scalar_t>
+int launch_matmul_tiled(const void* a, const void* b, void* out, int m, int n, int k) {
+  constexpr int kTile = 16;
+  dim3 block(kTile, kTile);
+  dim3 grid((n + kTile - 1) / kTile, (m + kTile - 1) / kTile);
+  matmul_tiled_kernel<scalar_t, kTile><<<grid, block>>>(
+      static_cast<const scalar_t*>(a), static_cast<const scalar_t*>(b), static_cast<scalar_t*>(out), m, n, k);
   return static_cast<int>(cudaGetLastError());
 }
 
@@ -238,6 +373,56 @@ int launch_paged_attention_decode(
   return static_cast<int>(cudaGetLastError());
 }
 
+template <typename scalar_t>
+int launch_dense_attention_prefill(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale) {
+  dim3 grid(batch_size, num_heads, seq_len);
+  dense_attention_prefill_kernel<<<grid, kThreads>>>(
+      static_cast<const scalar_t*>(query),
+      static_cast<const scalar_t*>(key),
+      static_cast<const scalar_t*>(value),
+      static_cast<scalar_t*>(out),
+      batch_size,
+      num_heads,
+      seq_len,
+      head_dim,
+      scale);
+  return static_cast<int>(cudaGetLastError());
+}
+
+template <typename scalar_t>
+int launch_dense_attention_decode(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale) {
+  dim3 grid(batch_size, num_heads);
+  dense_attention_decode_kernel<<<grid, kThreads>>>(
+      static_cast<const scalar_t*>(query),
+      static_cast<const scalar_t*>(key),
+      static_cast<const scalar_t*>(value),
+      static_cast<scalar_t*>(out),
+      batch_size,
+      num_heads,
+      seq_len,
+      head_dim,
+      scale);
+  return static_cast<int>(cudaGetLastError());
+}
+
 }  // namespace
 
 extern "C" int softmax_cuda_launcher(const void* x, void* out, int rows, int cols, int dtype) {
@@ -262,6 +447,12 @@ extern "C" int matmul_cuda_launcher(const void* a, const void* b, void* out, int
   if (dtype == 0) return launch_matmul<float>(a, b, out, m, n, k);
   if (dtype == 1) return launch_matmul<__half>(a, b, out, m, n, k);
   return launch_matmul<__nv_bfloat16>(a, b, out, m, n, k);
+}
+
+extern "C" int matmul_tiled_cuda_launcher(const void* a, const void* b, void* out, int m, int n, int k, int dtype) {
+  if (dtype == 0) return launch_matmul_tiled<float>(a, b, out, m, n, k);
+  if (dtype == 1) return launch_matmul_tiled<__half>(a, b, out, m, n, k);
+  return launch_matmul_tiled<__nv_bfloat16>(a, b, out, m, n, k);
 }
 
 extern "C" int paged_attention_decode_cuda_launcher(
@@ -289,4 +480,44 @@ extern "C" int paged_attention_decode_cuda_launcher(
   }
   return launch_paged_attention_decode<__nv_bfloat16>(
       query, key_cache, value_cache, block_tables, context_lens, out, batch_size, num_heads, num_kv_heads, head_dim, max_blocks, block_size, scale);
+}
+
+extern "C" int dense_attention_prefill_cuda_launcher(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale,
+    int dtype) {
+  if (dtype == 0) {
+    return launch_dense_attention_prefill<float>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
+  }
+  if (dtype == 1) {
+    return launch_dense_attention_prefill<__half>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
+  }
+  return launch_dense_attention_prefill<__nv_bfloat16>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
+}
+
+extern "C" int dense_attention_decode_cuda_launcher(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale,
+    int dtype) {
+  if (dtype == 0) {
+    return launch_dense_attention_decode<float>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
+  }
+  if (dtype == 1) {
+    return launch_dense_attention_decode<__half>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
+  }
+  return launch_dense_attention_decode<__nv_bfloat16>(query, key, value, out, batch_size, num_heads, seq_len, head_dim, scale);
 }

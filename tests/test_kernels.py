@@ -5,6 +5,7 @@ from course_vllm.kernels import (
     assert_close,
     benchmark_cuda,
     cuda_matmul,
+    cuda_matmul_tiled,
     cuda_rms_norm,
     cuda_rope,
     cuda_softmax,
@@ -55,6 +56,14 @@ def test_cuda_matmul_matches_torch():
     b = torch.randn(33, 11, device="cuda")
     actual = cuda_matmul(a, b)
     assert_close("cuda_matmul", actual, a @ b, atol=1e-3, rtol=1e-3)
+
+
+def test_cuda_matmul_tiled_matches_torch():
+    _require_cuda()
+    a = torch.randn(31, 65, device="cuda")
+    b = torch.randn(65, 17, device="cuda")
+    actual = cuda_matmul_tiled(a, b)
+    assert_close("cuda_matmul_tiled", actual, a @ b, atol=1e-3, rtol=1e-3)
 
 
 def test_cuda_matmul_not_much_slower_than_torch_on_small_teaching_case():

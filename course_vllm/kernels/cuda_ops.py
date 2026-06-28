@@ -41,6 +41,16 @@ def cuda_matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return _module().matmul(a, b)
 
 
+def cuda_matmul_tiled(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    a = _require_cuda("a", a).contiguous()
+    b = _require_cuda("b", b).contiguous()
+    if a.ndim != 2 or b.ndim != 2:
+        raise ValueError("matmul inputs must be 2D")
+    if a.shape[1] != b.shape[0]:
+        raise ValueError(f"matmul shape mismatch: {tuple(a.shape)} vs {tuple(b.shape)}")
+    return _module().matmul_tiled(a, b)
+
+
 def cuda_paged_attention_decode(
     query: torch.Tensor,
     key_cache: torch.Tensor,
@@ -77,6 +87,48 @@ def cuda_paged_attention_decode(
         raise KernelUnavailable("teaching CUDA paged attention kernel supports head_dim <= 256")
     scale = head_dim**-0.5 if scale is None else scale
     return _module().paged_attention_decode(query, key_cache, value_cache, tables, lens, block_size, float(scale))
+
+
+def cuda_dense_attention_prefill(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    scale: float | None = None,
+) -> torch.Tensor:
+    query = _require_cuda("query", query).contiguous()
+    key = _require_cuda("key", key).contiguous()
+    value = _require_cuda("value", value).contiguous()
+    if query.ndim != 4 or key.shape != query.shape or value.shape != query.shape:
+        raise ValueError("expected Q/K/V shape [batch, heads, seq, dim]")
+    if key.dtype != query.dtype or value.dtype != query.dtype:
+        raise ValueError("Q/K/V dtypes must match")
+    if query.shape[-1] > 256:
+        raise KernelUnavailable("teaching CUDA dense attention kernel supports head_dim <= 256")
+    scale = query.shape[-1] ** -0.5 if scale is None else scale
+    return _module().dense_attention_prefill(query, key, value, float(scale))
+
+
+def cuda_dense_attention_decode(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    scale: float | None = None,
+) -> torch.Tensor:
+    query = _require_cuda("query", query).contiguous()
+    key = _require_cuda("key", key).contiguous()
+    value = _require_cuda("value", value).contiguous()
+    if query.ndim != 3 or key.ndim != 4 or value.shape != key.shape:
+        raise ValueError("expected query [batch, heads, dim] and K/V [batch, heads, seq, dim]")
+    if query.shape[0] != key.shape[0] or query.shape[1] != key.shape[1] or query.shape[2] != key.shape[3]:
+        raise ValueError("query and K/V shapes must align")
+    if key.dtype != query.dtype or value.dtype != query.dtype:
+        raise ValueError("Q/K/V dtypes must match")
+    if query.shape[-1] > 256:
+        raise KernelUnavailable("teaching CUDA dense decode attention kernel supports head_dim <= 256")
+    scale = query.shape[-1] ** -0.5 if scale is None else scale
+    return _module().dense_attention_decode(query, key, value, float(scale))
 
 
 def _module():
@@ -137,7 +189,10 @@ def _metadata_tensors(
 
 
 __all__ = [
+    "cuda_dense_attention_decode",
+    "cuda_dense_attention_prefill",
     "cuda_matmul",
+    "cuda_matmul_tiled",
     "cuda_paged_attention_decode",
     "cuda_rms_norm",
     "cuda_rope",

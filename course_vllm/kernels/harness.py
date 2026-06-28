@@ -10,9 +10,7 @@ import sys
 import torch
 from torch.utils.cpp_extension import load
 
-
-class KernelUnavailable(RuntimeError):
-    pass
+from course_vllm.kernels.errors import KernelUnavailable
 
 
 @lru_cache(maxsize=8)

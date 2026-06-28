@@ -42,8 +42,8 @@ class PagedKVCache:
         self.key_cache = torch.empty(shape, dtype=config.dtype, device=config.device)
         self.value_cache = torch.empty(shape, dtype=config.dtype, device=config.device)
 
-    def allocate(self, seq_id: int, num_tokens: int) -> None:
-        self.block_manager.allocate(seq_id=seq_id, num_tokens=num_tokens)
+    def allocate(self, seq_id: int, num_tokens: int, *, token_ids: list[int] | None = None) -> None:
+        self.block_manager.allocate(seq_id=seq_id, num_tokens=num_tokens, token_ids=token_ids)
 
     def append(
         self,
@@ -74,14 +74,25 @@ class PagedKVCache:
         positions: list[int],
         key: torch.Tensor,
         value: torch.Tensor,
+        *,
+        skip_shared: bool = False,
     ) -> None:
         self._validate_layer_id(layer_id)
         self._validate_kv(key, value)
         if key.shape[-2] != len(positions):
             raise ValueError("number of positions must match KV sequence length")
-        slots = self.block_manager.slot_mapping(seq_id, positions)
         key_tokens = key.squeeze(0).transpose(0, 1).contiguous()
         value_tokens = value.squeeze(0).transpose(0, 1).contiguous()
+        if skip_shared:
+            positions, key_tokens, value_tokens = self._owned_write_view(
+                seq_id,
+                positions,
+                key_tokens,
+                value_tokens,
+            )
+            if not positions:
+                return
+        slots = self.block_manager.slot_mapping(seq_id, positions)
         self.key_cache[layer_id, slots] = key_tokens
         self.value_cache[layer_id, slots] = value_tokens
 
@@ -102,6 +113,33 @@ class PagedKVCache:
 
     def release(self, seq_id: int) -> None:
         self.block_manager.release(seq_id)
+
+    def usage_stats(self) -> dict:
+        return self.block_manager.usage_stats()
+
+    def _owned_write_view(
+        self,
+        seq_id: int,
+        positions: list[int],
+        key_tokens: torch.Tensor,
+        value_tokens: torch.Tensor,
+    ) -> tuple[list[int], torch.Tensor, torch.Tensor]:
+        table = self.block_manager.tables[seq_id]
+        owned_indices = [
+            index
+            for index, position in enumerate(positions)
+            if table.block_ids[position // self.config.block_size] in table.owned_block_ids
+        ]
+        if len(owned_indices) == len(positions):
+            return positions, key_tokens, value_tokens
+        if not owned_indices:
+            return [], key_tokens[:0], value_tokens[:0]
+        index_tensor = torch.tensor(owned_indices, dtype=torch.long, device=key_tokens.device)
+        return (
+            [positions[index] for index in owned_indices],
+            key_tokens.index_select(0, index_tensor),
+            value_tokens.index_select(0, index_tensor),
+        )
 
     def _validate_layer_id(self, layer_id: int) -> None:
         if layer_id < 0 or layer_id >= self.config.num_layers:

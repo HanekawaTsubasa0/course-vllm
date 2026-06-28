@@ -11,6 +11,7 @@ from course_vllm.model.qwen3_torch import (
     apply_rotary_pos_emb,
     repeat_kv,
 )
+from course_vllm.model.ops import CourseLinear, dense_attention_prefill_reference
 
 
 def tiny_config() -> Qwen3Config:
@@ -52,6 +53,28 @@ def test_rotary_embedding_keeps_qk_shapes():
     q_out, k_out = apply_rotary_pos_emb(q, k, cos, sin)
     assert q_out.shape == q.shape
     assert k_out.shape == k.shape
+
+
+def test_course_linear_matches_torch_linear():
+    torch.manual_seed(0)
+    layer = CourseLinear(4, 3, bias=True)
+    x = torch.randn(2, 5, 4)
+    expected = torch.nn.functional.linear(x, layer.weight, layer.bias)
+    assert torch.allclose(layer(x), expected)
+
+
+def test_dense_attention_prefill_reference_matches_torch_attention():
+    torch.manual_seed(0)
+    query = torch.randn(2, 3, 4, 5)
+    key = torch.randn(2, 3, 4, 5)
+    value = torch.randn(2, 3, 4, 5)
+    scale = query.shape[-1] ** -0.5
+    scores = torch.matmul(query, key.transpose(-2, -1)) * scale
+    mask = torch.triu(torch.ones(4, 4, dtype=torch.bool), diagonal=1)
+    scores = scores.masked_fill(mask, torch.finfo(scores.dtype).min)
+    expected = torch.matmul(torch.softmax(scores, dim=-1), value)
+    actual = dense_attention_prefill_reference(query, key, value, scale=scale, block_size=2)
+    assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
 
 
 def test_tiny_qwen3_forward_shape():
@@ -218,6 +241,53 @@ def test_qwen3_paged_backend_stores_layers_without_growing_length_per_layer():
     assert backend.kv_cache.block_manager.tables[handle.seq_id].length == 4
     assert torch.equal(restored.key_values[0][0], first_key)
     assert torch.equal(restored.key_values[1][0], second_key)
+
+
+def test_qwen3_paged_backend_prefill_uses_prefix_cache_without_overwrite():
+    backend = object.__new__(Qwen3PagedBackend)
+    backend._cache_ids = iter([1, 2])
+    backend.model = Qwen3ForCausalLM(tiny_config())
+    backend.kv_cache = PagedKVCache(
+        PagedKVConfig(
+            num_layers=2,
+            num_blocks=8,
+            block_size=2,
+            num_kv_heads=2,
+            head_dim=4,
+        )
+    )
+    first_key = torch.arange(48, dtype=torch.float32).view(1, 2, 6, 4)
+    first_value = first_key + 100
+    second_key = torch.full((1, 2, 6, 4), 7.0)
+    second_value = torch.full((1, 2, 6, 4), 8.0)
+
+    first = backend._store_cache(
+        Qwen3KVCache(
+            key_values=[
+                (first_key[:, :, :3], first_value[:, :, :3]),
+                (first_key[:, :, :3] + 200, first_value[:, :, :3] + 200),
+            ],
+            seq_len=3,
+        ),
+        token_ids=[1, 2, 3],
+    )
+    second = backend._store_cache(
+        Qwen3KVCache(
+            key_values=[
+                (second_key[:, :, :3], second_value[:, :, :3]),
+                (second_key[:, :, :3] + 200, second_value[:, :, :3] + 200),
+            ],
+            seq_len=3,
+        ),
+        token_ids=[1, 2, 4],
+    )
+
+    assert backend.kv_cache.block_table(first.seq_id)[0] == backend.kv_cache.block_table(second.seq_id)[0]
+    restored_first = backend._load_cache(first)
+    restored_second = backend._load_cache(second)
+    assert torch.equal(restored_first.key_values[0][0], first_key[:, :, :3])
+    assert torch.equal(restored_second.key_values[0][0][:, :, :2], first_key[:, :, :2])
+    assert torch.equal(restored_second.key_values[0][0][:, :, 2:], second_key[:, :, 2:3])
 
 
 def test_qwen3_paged_backend_decode_matches_continuous_backend():

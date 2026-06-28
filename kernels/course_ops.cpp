@@ -5,6 +5,7 @@ extern "C" int softmax_cuda_launcher(const void* x, void* out, int rows, int col
 extern "C" int rms_norm_cuda_launcher(const void* x, const void* weight, void* out, int rows, int cols, float eps, int dtype);
 extern "C" int rope_cuda_launcher(const void* x, const void* cos, const void* sin, void* out, int rows, int cols, int dtype);
 extern "C" int matmul_cuda_launcher(const void* a, const void* b, void* out, int m, int n, int k, int dtype);
+extern "C" int matmul_tiled_cuda_launcher(const void* a, const void* b, void* out, int m, int n, int k, int dtype);
 extern "C" int paged_attention_decode_cuda_launcher(
     const void* query,
     const void* key_cache,
@@ -18,6 +19,28 @@ extern "C" int paged_attention_decode_cuda_launcher(
     int head_dim,
     int max_blocks,
     int block_size,
+    float scale,
+    int dtype);
+extern "C" int dense_attention_prefill_cuda_launcher(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
+    float scale,
+    int dtype);
+extern "C" int dense_attention_decode_cuda_launcher(
+    const void* query,
+    const void* key,
+    const void* value,
+    void* out,
+    int batch_size,
+    int num_heads,
+    int seq_len,
+    int head_dim,
     float scale,
     int dtype);
 
@@ -85,6 +108,17 @@ torch::Tensor matmul(torch::Tensor a, torch::Tensor b) {
   return out;
 }
 
+torch::Tensor matmul_tiled(torch::Tensor a, torch::Tensor b) {
+  check_cuda(a, "a");
+  check_cuda(b, "b");
+  TORCH_CHECK(a.dim() == 2 && b.dim() == 2, "matmul inputs must be 2D");
+  TORCH_CHECK(a.size(1) == b.size(0), "matmul shape mismatch");
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(), "matmul input dtypes must match");
+  auto out = torch::empty({a.size(0), b.size(1)}, a.options());
+  check_launch(matmul_tiled_cuda_launcher(a.data_ptr(), b.data_ptr(), out.data_ptr(), a.size(0), b.size(1), a.size(1), dtype_code(a)));
+  return out;
+}
+
 torch::Tensor paged_attention_decode(
     torch::Tensor query,
     torch::Tensor key_cache,
@@ -122,10 +156,59 @@ torch::Tensor paged_attention_decode(
   return out;
 }
 
+torch::Tensor dense_attention_prefill(torch::Tensor query, torch::Tensor key, torch::Tensor value, double scale) {
+  check_cuda(query, "query");
+  check_cuda(key, "key");
+  check_cuda(value, "value");
+  TORCH_CHECK(query.dim() == 4 && key.sizes() == query.sizes() && value.sizes() == query.sizes(), "expected Q/K/V shape [batch, heads, seq, dim]");
+  TORCH_CHECK(query.scalar_type() == key.scalar_type() && query.scalar_type() == value.scalar_type(), "Q/K/V dtypes must match");
+  TORCH_CHECK(query.size(3) <= 256, "head_dim must be <= 256 for this teaching kernel");
+  auto out = torch::empty_like(query);
+  check_launch(dense_attention_prefill_cuda_launcher(
+      query.data_ptr(),
+      key.data_ptr(),
+      value.data_ptr(),
+      out.data_ptr(),
+      query.size(0),
+      query.size(1),
+      query.size(2),
+      query.size(3),
+      static_cast<float>(scale),
+      dtype_code(query)));
+  return out;
+}
+
+torch::Tensor dense_attention_decode(torch::Tensor query, torch::Tensor key, torch::Tensor value, double scale) {
+  check_cuda(query, "query");
+  check_cuda(key, "key");
+  check_cuda(value, "value");
+  TORCH_CHECK(query.dim() == 3, "expected query shape [batch, heads, dim]");
+  TORCH_CHECK(key.dim() == 4 && value.sizes() == key.sizes(), "expected K/V shape [batch, heads, seq, dim]");
+  TORCH_CHECK(query.size(0) == key.size(0) && query.size(1) == key.size(1) && query.size(2) == key.size(3), "query and K/V shapes must align");
+  TORCH_CHECK(query.scalar_type() == key.scalar_type() && query.scalar_type() == value.scalar_type(), "Q/K/V dtypes must match");
+  TORCH_CHECK(query.size(2) <= 256, "head_dim must be <= 256 for this teaching kernel");
+  auto out = torch::empty_like(query);
+  check_launch(dense_attention_decode_cuda_launcher(
+      query.data_ptr(),
+      key.data_ptr(),
+      value.data_ptr(),
+      out.data_ptr(),
+      query.size(0),
+      query.size(1),
+      key.size(2),
+      query.size(2),
+      static_cast<float>(scale),
+      dtype_code(query)));
+  return out;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("softmax", &softmax, "row-wise softmax");
   m.def("rms_norm", &rms_norm, "RMSNorm");
   m.def("rope", &rope, "Qwen-style RoPE");
   m.def("matmul", &matmul, "naive matrix multiplication");
+  m.def("matmul_tiled", &matmul_tiled, "tiled matrix multiplication");
   m.def("paged_attention_decode", &paged_attention_decode, "paged attention decode");
+  m.def("dense_attention_prefill", &dense_attention_prefill, "dense prefill attention with online softmax");
+  m.def("dense_attention_decode", &dense_attention_decode, "dense decode attention with online softmax");
 }

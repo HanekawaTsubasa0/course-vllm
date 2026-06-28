@@ -1,5 +1,17 @@
-from course_vllm.engine.engine import Engine
-from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
-from course_vllm.engine.sampler import SamplingParams
-
 __all__ = ["Engine", "PagedKVCache", "PagedKVConfig", "SamplingParams"]
+
+
+def __getattr__(name: str):
+    if name == "Engine":
+        from course_vllm.engine.engine import Engine
+
+        return Engine
+    if name in {"PagedKVCache", "PagedKVConfig"}:
+        from course_vllm.engine import paged_kv_cache
+
+        return getattr(paged_kv_cache, name)
+    if name == "SamplingParams":
+        from course_vllm.engine.sampler import SamplingParams
+
+        return SamplingParams
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

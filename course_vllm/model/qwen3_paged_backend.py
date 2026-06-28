@@ -22,12 +22,18 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
         trust_remote_code: bool = True,
         num_blocks: int = 512,
         block_size: int = 16,
+        kernel_impl: str = "torch",
+        use_pinned_memory: bool = False,
+        use_transfer_stream: bool = False,
     ):
         super().__init__(
             model_path,
             dtype=dtype,
             device=device,
             trust_remote_code=trust_remote_code,
+            kernel_impl=kernel_impl,
+            use_pinned_memory=use_pinned_memory,
+            use_transfer_stream=use_transfer_stream,
         )
         config = self.model.config
         self.kv_cache = PagedKVCache(
@@ -81,7 +87,7 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
             raise ValueError("paged decode batch cannot contain duplicate sequence handles")
 
         batch_size = len(token_ids)
-        input_ids = torch.tensor([[token_id] for token_id in token_ids], dtype=torch.long, device=self.device)
+        input_ids = self._token_tensor([[token_id] for token_id in token_ids])
         hidden_states = self.model.model.embed_tokens(input_ids)
         position_ids = torch.tensor(
             [[handle.seq_len] for handle in handles],
@@ -107,7 +113,7 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
             query = attn.q_norm(query).transpose(1, 2)
             key = attn.k_norm(key).transpose(1, 2)
             value = value.transpose(1, 2)
-            query, key = apply_rotary_pos_emb(query, key, cos, sin)
+            query, key = apply_rotary_pos_emb(query, key, cos, sin, kernel_impl=attn.kernel_impl)
 
             for batch_index, handle in enumerate(handles):
                 self.kv_cache.write(
@@ -142,12 +148,21 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
         cache: Qwen3KVCache,
         seq_id: int | None = None,
         append_from: int = 0,
+        token_ids: list[int] | None = None,
     ) -> KVCacheHandle:
         if seq_id is None:
             seq_id = next(self._cache_ids)
-            self.kv_cache.allocate(seq_id=seq_id, num_tokens=0)
-        num_new_tokens = cache.seq_len - append_from
-        positions = self.kv_cache.reserve(seq_id=seq_id, num_new_tokens=num_new_tokens)
+            if token_ids is not None:
+                self.kv_cache.allocate(seq_id=seq_id, num_tokens=cache.seq_len, token_ids=token_ids)
+                positions = list(range(append_from, cache.seq_len))
+                skip_shared = True
+            else:
+                self.kv_cache.allocate(seq_id=seq_id, num_tokens=0)
+                positions = self.kv_cache.reserve(seq_id=seq_id, num_new_tokens=cache.seq_len - append_from)
+                skip_shared = False
+        else:
+            positions = self.kv_cache.reserve(seq_id=seq_id, num_new_tokens=cache.seq_len - append_from)
+            skip_shared = False
         for layer_id, (key, value) in enumerate(cache.key_values):
             self.kv_cache.write(
                 seq_id=seq_id,
@@ -155,6 +170,7 @@ class Qwen3PagedBackend(Qwen3TorchBackend):
                 positions=positions,
                 key=key[:, :, append_from:, :],
                 value=value[:, :, append_from:, :],
+                skip_shared=skip_shared,
             )
         return KVCacheHandle(seq_id=seq_id, seq_len=cache.seq_len)
 

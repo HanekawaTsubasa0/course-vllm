@@ -1,0 +1,1010 @@
+# course-vllm 课程教学全过程运行手册
+
+本文档面向教师和助教，说明如何把 `course-vllm` 当作贯穿全学期的课程项目使用。它按 16 周组织课堂目标、代码入口、演示命令、学生任务、自动评测和交付物。AscendC 第 14 周按当前课程决策暂缓，其余周次均已跑通过。
+
+## 0. 上课前准备
+
+### 0.1 进入工程
+
+```bash
+cd /home/wangqi/llm_serving/course-vllm
+source .venv/bin/activate
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+```
+
+### 0.2 确认 GPU
+
+```bash
+nvidia-smi
+python - <<'PY'
+import torch
+print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.device_count())
+if torch.cuda.is_available():
+    print(torch.cuda.get_device_name(0))
+PY
+```
+
+本次验证环境：
+
+- GPU: 2 x NVIDIA GeForce RTX 4090
+- Driver: 570.86.15
+- CUDA: 12.8
+- PyTorch: 2.8.0+cu128
+- Model: Qwen/Qwen3-0.6B, local HuggingFace cache
+
+注意：某些沙箱默认看不到 GPU。若 `torch.cuda.is_available()` 为 False，但 `nvidia-smi` 在非沙箱终端可见，需要在 GPU 可见环境运行 CUDA 测试和 profiler。
+
+### 0.3 全量健康检查
+
+```bash
+pytest -q -rs
+```
+
+本次结果：
+
+```text
+88 passed in 4.56s
+```
+
+### 0.4 逐周自动评测
+
+```bash
+mkdir -p profiles/reports
+for week in week01 week02 week03 week04 week05 week06 week07 week08 week09 week10 week11 week12 week13 week15; do
+  echo "=== $week ==="
+  python -m course_vllm.benchmarks.grader "$week"
+done | tee profiles/reports/all_stage_grader_summary.txt
+```
+
+本次结果：
+
+| 周次 | 结果 |
+| --- | --- |
+| week01 | 13 passed |
+| week02 | 7 passed |
+| week03 | 1 passed |
+| week04 | 2 passed |
+| week05 | 3 passed |
+| week06 | 4 passed |
+| week07 | 10 passed |
+| week08 | 3 passed |
+| week09 | 11 passed |
+| week10 | 12 passed |
+| week11 | 12 passed |
+| week12 | 3 passed |
+| week13 | 2 passed |
+| week15 | 2 passed |
+
+第 14 周 AscendC 暂缓，不纳入当前自动评测。
+
+### 0.5 课程工程核心开关
+
+服务和离线脚本都支持：
+
+```text
+--backend hf|course|paged
+--stage week01..week16
+--kernel-impl torch|auto|cuda
+```
+
+- `hf`: HuggingFace 参考后端。
+- `course`: 课程自有 Qwen3 + 连续 KV cache。
+- `paged`: 课程自有 Qwen3 + paged KV cache。
+- `kernel-impl=torch`: 只走 PyTorch/reference。
+- `kernel-impl=auto`: CUDA tensor 上优先课程 CUDA kernel，失败回退。
+- `kernel-impl=cuda`: 强制课程 CUDA kernel，kernel 不可用时报错。
+
+## 1. Week 01 课程导论与 Baseline Serving
+
+### 教学目标
+
+- 讲清楚 LLM serving 的 prefill 和 decode。
+- 介绍 TTFT、TPOT、requests/s、tokens/s、SLO。
+- 让学生第一次启动服务并看到流式输出。
+
+### 代码入口
+
+- `course_vllm/server/api.py`
+- `course_vllm/engine/engine.py`
+- `course_vllm/engine/request.py`
+- `examples/chat_client.py`
+
+### 课堂演示
+
+启动服务：
+
+```bash
+python -m course_vllm.server.api \
+  --model Qwen/Qwen3-0.6B \
+  --backend paged \
+  --stage week01 \
+  --kernel-impl auto \
+  --dtype bfloat16 \
+  --port 18080
+```
+
+健康检查：
+
+```bash
+curl -s http://127.0.0.1:18080/health
+```
+
+非流式请求：
+
+```bash
+curl -s -X POST http://127.0.0.1:18080/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Hello","stream":false,"sampling_params":{"temperature":0,"max_tokens":8}}'
+```
+
+流式请求：
+
+```bash
+curl -s -N -X POST http://127.0.0.1:18080/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Hello","stream":true,"sampling_params":{"temperature":0,"max_tokens":8}}'
+```
+
+### 学生任务
+
+- 在 `Engine.generate_stream` 中标注 prefill、sample、decode、stop 的位置。
+- 记录一次 baseline 请求延迟。
+- 解释为什么 decode 每次只输入一个 token。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week01
+```
+
+### 交付物
+
+- 服务启动命令。
+- `/health` 输出。
+- 一条 streaming 和一条 non-streaming 请求结果。
+- prefill/decode 调用链说明。
+
+## 2. Week 02 性能分析
+
+### 教学目标
+
+- 讲 FLOPs、访存量、计算访存比、roofline。
+- 使用 torch profiler、nsys、ncu 定位瓶颈。
+- 建立服务性能基线。
+
+### 代码入口
+
+- `course_vllm/benchmarks/bench_server.py`
+- `scripts/profile/torch_profiler.py`
+- `scripts/profile/nsys_server.sh`
+- `scripts/profile/ncu_kernel.sh`
+- `docs/reports/week02_profile_template.md`
+
+### 课堂演示
+
+Torch profiler：
+
+```bash
+python scripts/profile/torch_profiler.py \
+  --model Qwen/Qwen3-0.6B \
+  --backend paged \
+  --max-tokens 8 \
+  --out profiles/torch_profiler \
+  | tee profiles/reports/torch_profiler_summary.txt
+```
+
+Nsight Systems：
+
+```bash
+MODEL=Qwen/Qwen3-0.6B BACKEND=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready \
+  bash scripts/profile/nsys_server.sh \
+  | tee profiles/reports/nsys_server_ready_summary.txt
+```
+
+Nsight Compute：
+
+```bash
+OUT=profiles/ncu_kernels bash scripts/profile/ncu_kernel.sh \
+  | tee profiles/reports/ncu_kernel_summary.txt
+```
+
+### 本次实测结果
+
+- nsys benchmark: requests/s=1.430951, output tokens/s=11.447604, p99=1.710348 s。
+- torch profiler 热点：`aten::copy_`, PyTorch elementwise, `matmul_tiled_kernel`, `rms_norm_kernel`, `paged_attention_decode_kernel`。
+- ncu 当前受权限限制：`ERR_NVGPUCTRPERM`，但 CUDA 测试在 ncu 进程中通过。
+
+### 学生任务
+
+- 截取 nsys timeline 或说明 CUDA kernel 排布。
+- 从 profiler 表中找出 3 个主要耗时项。
+- 写出一个瓶颈判断和下一步优化方向。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week02
+```
+
+### 交付物
+
+- `docs/reports/week02_profile_template.md` 填写完成。
+- profiler 输出文件路径。
+- 瓶颈判断。
+
+## 3. Week 03 CUDA 入门
+
+### 教学目标
+
+- 理解 CUDA kernel 基本写法。
+- 学会 PyTorch extension JIT 编译。
+- 搭建后续算子复用的 correctness/benchmark harness。
+
+### 代码入口
+
+- `kernels/vector_add.cu`
+- `course_vllm/kernels/harness.py`
+- `tests/test_kernels.py`
+
+### 课堂演示
+
+```bash
+python -m pytest -q tests/test_kernels.py::test_vector_add_cuda_kernel_matches_torch -rs
+```
+
+### 学生任务
+
+- 修改 block size，观察是否影响 correctness。
+- 解释 `blockIdx`, `threadIdx`, `blockDim` 如何映射数组下标。
+- 记录首次 JIT 编译时间和再次运行时间差异。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week03
+```
+
+### 交付物
+
+- vector add 正确性结果。
+- kernel index 计算说明。
+- JIT 编译观察。
+
+## 4. Week 04 RMSNorm 与 RoPE
+
+### 教学目标
+
+- 理解 RMSNorm、RoPE、浮点误差和混合精度。
+- 把 CUDA RMSNorm/RoPE 接入 Qwen3 主路径。
+
+### 代码入口
+
+- `course_vllm/model/qwen3_torch.py`
+- `course_vllm/kernels/cuda_ops.py`
+- `kernels/course_ops.cu`
+
+### 课堂演示
+
+```bash
+python -m pytest -q \
+  tests/test_kernels.py::test_cuda_rms_norm_matches_torch \
+  tests/test_kernels.py::test_cuda_rope_matches_qwen3_rotate_half \
+  -rs
+```
+
+离线短生成：
+
+```bash
+python examples/offline_generate.py \
+  --model Qwen/Qwen3-0.6B \
+  --backend paged \
+  --stage week04 \
+  --kernel-impl auto \
+  --prompt "Hello" \
+  --max-tokens 4 \
+  --temperature 0
+```
+
+本次输出示例：
+
+```text
+Answer! I'm
+```
+
+### 学生任务
+
+- 比较 PyTorch 和 CUDA RMSNorm 输出误差。
+- 比较 PyTorch 和 CUDA RoPE 输出误差。
+- 用 `--kernel-impl=cuda` 确认 kernel 不可用时会失败。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week04
+```
+
+### 交付物
+
+- RMSNorm/RoPE 误差表。
+- kernel dispatch 路径说明。
+
+## 5. Week 05 线性层与矩阵乘
+
+### 教学目标
+
+- 理解 QKV/MLP projection 本质上是矩阵乘。
+- 对比 naive matmul、tiled matmul 和 PyTorch/cuBLAS。
+- 把 tiled matmul 接入 `CourseLinear` 主路径。
+
+### 代码入口
+
+- `course_vllm/model/ops.py`
+- `course_vllm/model/qwen3_torch.py`
+- `kernels/course_ops.cu`
+- `kernels/course_ops.cpp`
+
+### 课堂演示
+
+```bash
+python -m pytest -q \
+  tests/test_kernels.py::test_cuda_matmul_matches_torch \
+  tests/test_kernels.py::test_cuda_matmul_tiled_matches_torch \
+  tests/test_qwen3_torch.py::test_course_linear_matches_torch_linear \
+  -rs
+```
+
+### 学生任务
+
+- 画出 naive matmul 的 global memory 访问模式。
+- 画出 tiled matmul 的 shared memory 复用模式。
+- 计算一个 M x K 乘 K x N 的 FLOPs。
+- 说明为什么教学 kernel 不要求超过 cuBLAS。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week05
+```
+
+### 交付物
+
+- naive/tiled 正确性结果。
+- naive/tiled/PyTorch 运行时间对比。
+- `CourseLinear` 在 Qwen3 的接入位置。
+
+## 6. Week 06 归约与 Softmax
+
+### 教学目标
+
+- 理解 parallel reduction。
+- 理解稳定 softmax 为什么要减最大值。
+- 把 softmax 接入 sampling 路径。
+
+### 代码入口
+
+- `course_vllm/engine/sampler.py`
+- `course_vllm/kernels/cuda_ops.py`
+- `kernels/course_ops.cu`
+
+### 课堂演示
+
+```bash
+python -m pytest -q \
+  tests/test_kernels.py::test_cuda_softmax_matches_torch \
+  tests/test_sampler.py \
+  -rs
+```
+
+### 学生任务
+
+- 构造大 logits 说明朴素 softmax 溢出。
+- 解释 row-wise max reduction 和 sum reduction。
+- 比较 greedy、temperature、top-k 的采样路径。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week06
+```
+
+### 交付物
+
+- softmax 误差。
+- 溢出示例。
+- sampling 参数说明。
+
+## 7. Week 07 Attention
+
+### 教学目标
+
+- 区分 prefill attention 和 decode attention。
+- 理解 online softmax/FlashAttention 风格核心思想。
+- 验证 dense prefill、dense decode、paged decode CUDA 路径。
+
+### 代码入口
+
+- `course_vllm/model/ops.py`
+- `course_vllm/model/attention.py`
+- `course_vllm/model/qwen3_paged_backend.py`
+- `kernels/course_ops.cu`
+
+### 课堂演示
+
+```bash
+python -m pytest -q tests/test_attention.py -rs
+```
+
+### 学生任务
+
+- 对比 dense prefill 和 paged decode 的输入 shape。
+- 解释 online softmax 中 row max、denom、acc 如何更新。
+- 说明为什么 prefill 可以按 query position 并行，decode 是单 token 查询历史 KV。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week07
+```
+
+### 交付物
+
+- attention correctness 测试结果。
+- prefill/decode 路径图。
+- FlashAttention 风格内存节省说明。
+
+## 8. Week 08 KV Cache
+
+### 教学目标
+
+- 理解 KV cache 的作用。
+- 观察连续 KV cache append 和 decode 复用。
+- 理解 batch decode 按历史长度分桶。
+
+### 代码入口
+
+- `course_vllm/engine/kv_cache.py`
+- `course_vllm/model/qwen3_continuous_backend.py`
+
+### 课堂演示
+
+```bash
+python -m pytest -q tests/test_kv_cache.py tests/test_qwen3_torch.py
+```
+
+### 学生任务
+
+- 打印每层 key/value shape。
+- 对比无 cache 全序列 forward 和 cache decode 数据量。
+- 说明 cache handle 为什么要记录 `seq_id` 和 `seq_len`。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week08
+```
+
+### 交付物
+
+- KV cache shape 表。
+- 连续 decode 调用链。
+
+## 9. Week 09 推理引擎
+
+### 教学目标
+
+- 实现请求生命周期。
+- 理解 tokenizer 边界、stop 条件、streaming event。
+- 对单请求推理做 profiler baseline。
+
+### 代码入口
+
+- `course_vllm/engine/engine.py`
+- `course_vllm/engine/request.py`
+- `scripts/profile/torch_profiler.py`
+
+### 课堂演示
+
+```bash
+python -m pytest -q tests/test_engine.py tests/test_chat_client.py
+python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend paged --max-tokens 8
+```
+
+### 学生任务
+
+- 追踪 `Request` 和 `Sequence` 状态变化。
+- 解释 EOS、stop token、max_tokens 三种结束原因。
+- 保存 profiler 输出。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week09
+```
+
+### 交付物
+
+- 请求状态机。
+- profiler baseline。
+
+## 10. Week 10 分页 KV Cache
+
+### 教学目标
+
+- 理解 block manager、block table、slot mapping。
+- 理解 prefix cache 和碎片统计。
+
+### 代码入口
+
+- `course_vllm/engine/block_manager.py`
+- `course_vllm/engine/paged_kv_cache.py`
+- `examples/block_usage.py`
+
+### 课堂演示
+
+```bash
+python examples/block_usage.py \
+  --num-blocks 8 \
+  --block-size 4 \
+  --prompt-lens 3,6,9 \
+  --decode-steps 2
+```
+
+本次输出摘要：
+
+- prefill: used=6, free=2, fragmentation_ratio=0.250
+- decode step 1: fragmentation_ratio=0.125
+- decode step 2: used=7, free=1, fragmentation_ratio=0.143
+
+### 学生任务
+
+- 手算一个 sequence 的 slot mapping。
+- 解释 block table 如何把逻辑位置映射到物理 slot。
+- 构造共享 prefix 的 prompt，观察 prefix cached blocks。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week10
+```
+
+### 交付物
+
+- block table 示例。
+- fragmentation 统计。
+- prefix cache 复用解释。
+
+## 11. Week 11 连续批处理
+
+### 教学目标
+
+- 理解 waiting/running 队列。
+- 区分 prefill batch 和 decode batch。
+- 支持 chunked prefill、preemption 和 HTTP batching。
+
+### 代码入口
+
+- `course_vllm/engine/scheduler.py`
+- `course_vllm/server/batching.py`
+- `course_vllm/engine/engine.py`
+
+### 课堂演示
+
+```bash
+python -m pytest -q tests/test_scheduler.py tests/test_server_batching.py
+```
+
+启动服务压测：
+
+```bash
+python -m course_vllm.server.api \
+  --model Qwen/Qwen3-0.6B \
+  --backend paged \
+  --stage week11 \
+  --kernel-impl auto \
+  --dtype bfloat16 \
+  --max-batch-size 4 \
+  --batch-wait-ms 2 \
+  --max-queue-size 64 \
+  --max-prompt-chars 8192 \
+  --port 18081
+```
+
+另一个终端：
+
+```bash
+python -m course_vllm.benchmarks.bench_server \
+  --url http://127.0.0.1:18081/generate \
+  --num-requests 8 \
+  --concurrency 2 \
+  --max-tokens 8 \
+  --json
+```
+
+本次 baseline：
+
+- requests/s=4.038430
+- output tokens/s=32.307436
+- p50=0.231115
+- p99=1.248274
+
+### 学生任务
+
+- 画出 scheduler 状态转换。
+- 修改 `max_num_batched_tokens`，观察 chunked prefill。
+- 比较不同 `batch_wait_ms` 对 batch size 和 latency 的影响。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week11
+```
+
+### 交付物
+
+- throughput/latency 曲线。
+- scheduler 策略说明。
+
+## 12. Week 12 系统优化
+
+### 教学目标
+
+- 讲 pinned memory、CUDA stream、异步执行和请求准入。
+- 将优化开关接入服务并对比性能。
+
+### 代码入口
+
+- `course_vllm/model/qwen3_continuous_backend.py`
+- `course_vllm/server/batching.py`
+- `course_vllm/benchmarks/system_optimization.py`
+- `docs/reports/week12_system_optimization_template.md`
+
+### 课堂演示
+
+```bash
+python -m course_vllm.benchmarks.system_optimization \
+  --pinned-memory \
+  --transfer-stream \
+  --max-queue-size 64 \
+  --max-prompt-chars 8192
+```
+
+优化配置服务：
+
+```bash
+python -m course_vllm.server.api \
+  --model Qwen/Qwen3-0.6B \
+  --backend paged \
+  --stage week12 \
+  --kernel-impl auto \
+  --dtype bfloat16 \
+  --max-batch-size 4 \
+  --batch-wait-ms 2 \
+  --max-queue-size 64 \
+  --max-prompt-chars 8192 \
+  --enable-chunked-prefill \
+  --cache-aware-scheduling \
+  --pinned-memory \
+  --transfer-stream \
+  --port 18082
+```
+
+压测：
+
+```bash
+python -m course_vllm.benchmarks.bench_server \
+  --url http://127.0.0.1:18082/generate \
+  --num-requests 8 \
+  --concurrency 2 \
+  --max-tokens 8 \
+  --json
+```
+
+本次 optimized：
+
+- requests/s=3.981867
+- output tokens/s=31.854933
+- p50=0.251096
+- p99=1.219466
+
+### 学生任务
+
+- 判断短负载下优化收益为什么不明显。
+- 解释 admission control 如何保护服务。
+- 用 nsys 找 memcpy、kernel、同步点。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week12
+```
+
+### 交付物
+
+- `docs/reports/week12_system_optimization_template.md`。
+- before/after benchmark 表。
+- nsys evidence。
+
+## 13. Week 13 多卡推理与容量规划
+
+### 教学目标
+
+- 讲 TP/PP/EP/NCCL/placement。
+- 在单卡上估算 KV cache 容量和多卡触发条件。
+
+### 代码入口
+
+- `course_vllm/benchmarks/capacity_planner.py`
+- `docs/reports/week13_capacity_planning_template.md`
+
+### 课堂演示
+
+```bash
+python -m course_vllm.benchmarks.capacity_planner \
+  --gpu-memory-gb 24 \
+  --weight-memory-gb 2 \
+  --num-layers 28 \
+  --num-kv-heads 8 \
+  --head-dim 128 \
+  --block-size 16 \
+  --max-model-len 2048 \
+  --target-concurrency 32 \
+  --target-sequence-len 2048 \
+  --report
+```
+
+本次结果：
+
+- KV budget=17.400 GiB
+- KV blocks=10181
+- token slots=162896
+- full-length sequences=79
+- target concurrency=32 不需要多卡扩容。
+
+### 学生任务
+
+- 修改 target concurrency，找到需要多卡的阈值。
+- 比较 float16/bfloat16/int8/fp8 对 KV 容量的影响。
+- 说明何时是容量瓶颈，何时是吞吐瓶颈。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week13
+```
+
+### 交付物
+
+- `docs/reports/week13_capacity_planning_template.md`。
+- 多卡触发条件判断。
+
+## 14. Week 14 AscendC
+
+### 当前状态
+
+本周按课程决策暂缓。工程保留 `week14` stage，但不要求当前仓库实现 AscendC kernel、官方 Add 样例或 CUDA/Ascend 对照。
+
+### 后续补齐条件
+
+- 有 Ascend 硬件或 CI。
+- 明确 CANN/AscendC 版本。
+- 选定一个与 CUDA 教学 kernel 对应的算子，例如 vector add、RMSNorm 或 softmax。
+
+### 当前交付
+
+- `docs/labs/week14_ascend_deferred.md`
+- `/health` 能说明 week14 deferred。
+
+## 15. Week 15 前沿专题
+
+### 教学目标
+
+- 把论文机制映射到工程模块。
+- 复现一个小型机制：cache-aware serving。
+- 理解 prefill/decode disaggregation、TokenDance-style scheduling 等方向如何落到系统。
+
+### 代码入口
+
+- `course_vllm/engine/policies.py`
+- `course_vllm/benchmarks/cache_aware_demo.py`
+- `docs/reports/week15_paper_to_system_template.md`
+
+### 课堂演示
+
+```bash
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "cache-aware serving" \
+  --prompts "1,2,3,4|1,2,3,9|8,7|1,2,5"
+```
+
+本次结果：
+
+- baseline shared-prefix score=3
+- cache-aware shared-prefix score=5
+- mapped modules: `engine/policies.py`, `engine/block_manager.py`, `engine/engine.py`
+
+### 学生任务
+
+- 选择一个机制写 paper-to-system map。
+- 说明要改哪些数据结构。
+- 说明影响 TTFT、TPOT、tokens/s、KV fragmentation 的路径。
+
+### 自动评测
+
+```bash
+python -m course_vllm.benchmarks.grader week15
+```
+
+### 交付物
+
+- `docs/reports/week15_paper_to_system_template.md`。
+- 一项机制 demo 的 before/after 指标。
+
+## 16. Week 16 总结与展示
+
+### 教学目标
+
+- 串联算子、缓存、调度、服务、profiling、容量规划和前沿机制。
+- 展示完整简化版 LLM serving engine。
+- 做一次工程故障诊断复盘。
+
+### 课堂演示顺序
+
+1. 全量测试：
+
+```bash
+pytest -q -rs
+```
+
+2. Qwen3/HF 对齐：
+
+```bash
+for mode in forward decode batch-prefill batch-decode; do
+  echo "=== $mode ==="
+  python validation/compare_qwen3.py "$mode" \
+    --model Qwen/Qwen3-0.6B \
+    --backend paged \
+    --dtype float32
+done
+```
+
+3. CUDA kernel/attention：
+
+```bash
+pytest -q tests/test_kernels.py tests/test_attention.py -rs
+```
+
+4. profiling：
+
+```bash
+python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend paged --max-tokens 8
+MODEL=Qwen/Qwen3-0.6B BACKEND=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready bash scripts/profile/nsys_server.sh
+```
+
+5. capacity planning：
+
+```bash
+python -m course_vllm.benchmarks.capacity_planner \
+  --gpu-memory-gb 24 \
+  --weight-memory-gb 2 \
+  --num-layers 28 \
+  --num-kv-heads 8 \
+  --head-dim 128 \
+  --report
+```
+
+6. frontend topic demo：
+
+```bash
+python -m course_vllm.benchmarks.cache_aware_demo --mechanism "cache-aware serving"
+```
+
+### 最终交付物
+
+- `docs/reports/week16_final_report_template.md`
+- `docs/runnable_validation_guide.md`
+- `profiles/reports/*`
+- `profiles/nsys_server_ready.nsys-rep`
+
+## 17. 常见故障与处理
+
+### GPU 不可见
+
+现象：
+
+```text
+torch.cuda.is_available() == False
+```
+
+处理：
+
+- 先运行 `nvidia-smi`。
+- 如果 `nvidia-smi` 在普通终端可见但当前环境不可见，说明是沙箱/容器权限问题。
+- 在 GPU 可见环境重跑 CUDA/profiler 命令。
+
+### HF 模型联网超时
+
+现象：
+
+```text
+HTTPSConnectionPool(host='huggingface.co'...)
+```
+
+处理：
+
+```bash
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+```
+
+课程 backend 已支持把 `Qwen/Qwen3-0.6B` 自动解析到本地 HuggingFace snapshot。
+
+### ncu 找不到
+
+脚本会自动找：
+
+- `/usr/local/cuda-12.8/bin/ncu`
+- `/usr/local/cuda/bin/ncu`
+- `/usr/local/NVIDIA-Nsight-Compute-2025.3/ncu`
+
+也可以手动：
+
+```bash
+NCU_BIN=/usr/local/cuda-12.8/bin/ncu OUT=profiles/ncu_kernels bash scripts/profile/ncu_kernel.sh
+```
+
+### ncu 无 performance counter 权限
+
+现象：
+
+```text
+ERR_NVGPUCTRPERM
+```
+
+处理：
+
+- 让管理员放开 NVIDIA GPU Performance Counters。
+- 或使用有权限的用户运行。
+- 课堂上可先用 torch profiler/nsys 完成瓶颈定位，说明 ncu 权限限制。
+
+### nsys 服务未启动就压测
+
+已修复：`scripts/profile/nsys_server.sh` 会轮询 `/health`，ready 后才运行 benchmark。
+
+## 18. 课程代码与文档对应关系
+
+| 类别 | 文件 |
+| --- | --- |
+| 周次定义 | `course_vllm/stages.py` |
+| 自动评测 | `course_vllm/benchmarks/grader.py` |
+| CUDA wrapper | `course_vllm/kernels/cuda_ops.py` |
+| CUDA source | `kernels/course_ops.cu`, `kernels/course_ops.cpp` |
+| Qwen3 模型 | `course_vllm/model/qwen3_torch.py` |
+| 连续 KV | `course_vllm/engine/kv_cache.py` |
+| 分页 KV | `course_vllm/engine/paged_kv_cache.py`, `course_vllm/engine/block_manager.py` |
+| 调度 | `course_vllm/engine/scheduler.py` |
+| HTTP batching | `course_vllm/server/batching.py` |
+| 服务 API | `course_vllm/server/api.py` |
+| 实验文档 | `docs/labs/week*.md` |
+| 报告模板 | `docs/reports/*.md` |
+| 运行验收 | `docs/runnable_validation_guide.md` |
+
+## 19. 本次已生成证据文件
+
+```text
+profiles/reports/all_stage_grader_summary.txt
+profiles/reports/course_demo_smoke.txt
+profiles/reports/qwen3_alignment_float32.txt
+profiles/reports/torch_profiler_summary.txt
+profiles/reports/ncu_kernel_summary.txt
+profiles/reports/nsys_server_ready_summary.txt
+profiles/reports/bench_baseline_week11.json
+profiles/reports/bench_optimized_week12.json
+profiles/reports/week12_system_optimization_plan.json
+profiles/reports/week13_capacity_report.md
+profiles/reports/week15_cache_aware_demo.json
+profiles/nsys_server_ready.nsys-rep
+profiles/torch_profiler/*.pt.trace.json
+```
+
+这些文件可直接用于课程展示、阶段检查和最终报告。

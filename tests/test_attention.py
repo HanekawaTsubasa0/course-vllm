@@ -3,8 +3,9 @@ import torch
 from torch.nn import functional as F
 
 from course_vllm.engine.paged_kv_cache import PagedKVCache, PagedKVConfig
-from course_vllm.kernels import benchmark_cuda, cuda_paged_attention_decode
+from course_vllm.kernels import benchmark_cuda, cuda_dense_attention_decode, cuda_paged_attention_decode
 from course_vllm.model.attention import paged_attention_decode, paged_attention_decode_reference
+from course_vllm.model.ops import dense_attention_decode, dense_attention_decode_reference
 from course_vllm.model.qwen3_torch import repeat_kv
 
 
@@ -120,6 +121,39 @@ def test_paged_attention_decode_rejects_incomplete_block_table():
             context_lens=[4],
             block_size=cache.config.block_size,
         )
+
+
+def test_dense_attention_decode_reference_matches_torch_attention():
+    torch.manual_seed(5)
+    query = torch.randn(2, 4, 8)
+    key = torch.randn(2, 4, 7, 8)
+    value = torch.randn(2, 4, 7, 8)
+    actual = dense_attention_decode_reference(query, key, value, scale=8**-0.5)
+    scores = torch.matmul(query.unsqueeze(2), key.transpose(-2, -1)).squeeze(2) * 8**-0.5
+    weights = torch.softmax(scores.float(), dim=-1).to(query.dtype)
+    expected = torch.matmul(weights.unsqueeze(2), value).squeeze(2)
+    assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_dense_attention_decode_dispatch_falls_back_on_cpu():
+    query = torch.randn(1, 2, 4)
+    key = torch.randn(1, 2, 3, 4)
+    value = torch.randn(1, 2, 3, 4)
+    actual = dense_attention_decode(query, key, value, scale=0.5, kernel_impl="auto")
+    expected = dense_attention_decode_reference(query, key, value, scale=0.5)
+    assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_cuda_dense_attention_decode_matches_reference():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is not available")
+    torch.manual_seed(6)
+    query = torch.randn(2, 4, 16, device="cuda")
+    key = torch.randn(2, 4, 9, 16, device="cuda")
+    value = torch.randn(2, 4, 9, 16, device="cuda")
+    actual = cuda_dense_attention_decode(query, key, value)
+    expected = dense_attention_decode_reference(query, key, value, scale=16**-0.5)
+    assert torch.allclose(actual, expected, atol=1e-5, rtol=1e-5)
 
 
 def test_cuda_paged_attention_decode_matches_dense_attention():

@@ -70,3 +70,35 @@ def test_paged_kv_cache_release_returns_blocks():
 
     cache.release(seq_id=4)
     assert cache.block_manager.num_free_blocks == 4
+
+
+def test_paged_kv_cache_prefix_cache_reuses_complete_blocks():
+    cache = _cache()
+    cache.allocate(seq_id=1, num_tokens=3, token_ids=[1, 2, 3])
+    cache.allocate(seq_id=2, num_tokens=3, token_ids=[1, 2, 4])
+
+    assert cache.block_table(1)[0] == cache.block_table(2)[0]
+    assert cache.usage_stats()["prefix_cached_blocks"] == 1
+
+
+def test_paged_kv_cache_skips_shared_prefix_writes():
+    cache = _cache()
+    first_key = torch.arange(18, dtype=torch.float32).view(1, 2, 3, 3)
+    first_value = first_key + 100
+    second_key = torch.full((1, 2, 3, 3), 7.0)
+    second_value = torch.full((1, 2, 3, 3), 8.0)
+
+    cache.allocate(seq_id=1, num_tokens=3, token_ids=[1, 2, 3])
+    cache.write(seq_id=1, layer_id=0, positions=[0, 1, 2], key=first_key, value=first_value, skip_shared=True)
+    cache.allocate(seq_id=2, num_tokens=3, token_ids=[1, 2, 4])
+    cache.write(seq_id=2, layer_id=0, positions=[0, 1, 2], key=second_key, value=second_value, skip_shared=True)
+
+    restored_first_key, restored_first_value = cache.get_dense(seq_id=1, layer_id=0)
+    restored_second_key, restored_second_value = cache.get_dense(seq_id=2, layer_id=0)
+
+    assert torch.equal(restored_first_key, first_key)
+    assert torch.equal(restored_first_value, first_value)
+    assert torch.equal(restored_second_key[:, :, :2], first_key[:, :, :2])
+    assert torch.equal(restored_second_value[:, :, :2], first_value[:, :, :2])
+    assert torch.equal(restored_second_key[:, :, 2:], second_key[:, :, 2:])
+    assert torch.equal(restored_second_value[:, :, 2:], second_value[:, :, 2:])

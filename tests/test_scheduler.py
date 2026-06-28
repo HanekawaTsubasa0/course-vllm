@@ -48,3 +48,40 @@ def test_scheduler_finish_removes_running_sequence():
 
     assert seq.status == RequestStatus.FINISHED
     assert not scheduler.has_unfinished()
+
+
+def test_scheduler_chunked_prefill_splits_long_prompt():
+    scheduler = Scheduler(max_num_seqs=2, max_num_batched_tokens=3, enable_chunked_prefill=True)
+    seq = _seq(5)
+    scheduler.add(seq)
+
+    first = scheduler.schedule()
+
+    assert first is not None and first.kind == BatchKind.PREFILL
+    assert first.num_tokens == 3
+    assert seq.scheduled_start == 0
+    assert seq.scheduled_end == 3
+    seq.prefill_offset = seq.scheduled_end
+
+    second = scheduler.schedule()
+    assert second is not None and second.kind == BatchKind.PREFILL
+    assert second.num_tokens == 2
+    assert seq.scheduled_start == 3
+    assert seq.scheduled_end == 5
+    seq.prefill_offset = seq.scheduled_end
+
+    decode = scheduler.schedule()
+    assert decode is not None and decode.kind == BatchKind.DECODE
+
+
+def test_scheduler_preempt_moves_sequence_back_to_waiting():
+    scheduler = Scheduler()
+    seq = _seq(2)
+    scheduler.add(seq)
+    scheduler.schedule()
+
+    scheduler.preempt(seq)
+
+    assert seq.status == RequestStatus.WAITING
+    assert list(scheduler.waiting) == [seq]
+    assert not scheduler.running

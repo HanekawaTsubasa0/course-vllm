@@ -6,6 +6,7 @@ import torch
 from transformers import AutoTokenizer
 
 from course_vllm.engine.kv_cache import ContinuousKVCache, KVCacheHandle
+from course_vllm.model.model_path import resolve_local_model_path
 from course_vllm.model.qwen3_torch import Qwen3ForCausalLM, Qwen3KVCache
 from course_vllm.model.types import BatchModelOutput, ModelOutput, parse_dtype
 
@@ -20,17 +21,29 @@ class Qwen3TorchBackend:
         dtype: str = "bfloat16",
         device: str | None = None,
         trust_remote_code: bool = True,
+        kernel_impl: str = "torch",
+        use_pinned_memory: bool = False,
+        use_transfer_stream: bool = False,
     ):
         self.model_path = model_path
+        local_model_path = resolve_local_model_path(model_path)
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.dtype = parse_dtype(dtype)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=trust_remote_code)
+        self.kernel_impl = kernel_impl
+        self.use_pinned_memory = use_pinned_memory
+        self.transfer_stream = (
+            torch.cuda.Stream(device=self.device)
+            if use_transfer_stream and self.device.type == "cuda"
+            else None
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = Qwen3ForCausalLM.from_pretrained(
-            model_path,
+            local_model_path,
             device=self.device,
             dtype=self.dtype,
+            kernel_impl=kernel_impl,
         )
         self.eos_token_id = self.tokenizer.eos_token_id
         self.kv_cache = ContinuousKVCache()
@@ -51,10 +64,25 @@ class Qwen3TorchBackend:
 
     @torch.inference_mode()
     def prefill(self, token_ids: list[int]) -> ModelOutput:
-        input_ids = torch.tensor([token_ids], dtype=torch.long, device=self.device)
+        input_ids = self._token_tensor([token_ids])
         logits, cache = self.model.forward_with_cache(input_ids)
-        handle = self._store_cache(cache)
+        handle = self._store_cache(cache, token_ids=token_ids)
         return ModelOutput(logits=logits[0, -1], past_key_values=handle)
+
+    @torch.inference_mode()
+    def prefill_chunk(self, token_ids: list[int], past_key_values: object | None = None) -> ModelOutput:
+        if not token_ids:
+            raise ValueError("token_ids must not be empty")
+        input_ids = self._token_tensor([token_ids])
+        if past_key_values is None:
+            logits, cache = self.model.forward_with_cache(input_ids)
+            handle = self._store_cache(cache, token_ids=token_ids)
+            return ModelOutput(logits=logits[0, -1], past_key_values=handle)
+        handle = self._expect_handle(past_key_values)
+        cache = self._load_cache(handle)
+        logits, cache = self.model.forward_with_cache(input_ids, past_key_values=cache)
+        new_handle = self._store_cache(cache, seq_id=handle.seq_id, append_from=handle.seq_len)
+        return ModelOutput(logits=logits[0, -1], past_key_values=new_handle)
 
     @torch.inference_mode()
     def prefill_batch(self, batch_token_ids: list[list[int]]) -> BatchModelOutput:
@@ -63,12 +91,12 @@ class Qwen3TorchBackend:
         lengths = [len(token_ids) for token_ids in batch_token_ids]
         max_len = max(lengths)
         pad_token_id = getattr(getattr(self, "tokenizer", None), "pad_token_id", 0) or 0
-        input_ids = torch.full((len(batch_token_ids), max_len), pad_token_id, dtype=torch.long, device=self.device)
+        input_ids = self._full_token_tensor((len(batch_token_ids), max_len), pad_token_id)
         for batch_index, token_ids in enumerate(batch_token_ids):
-            input_ids[batch_index, : len(token_ids)] = torch.tensor(token_ids, dtype=torch.long, device=self.device)
+            input_ids[batch_index, : len(token_ids)] = self._token_tensor(token_ids)
         logits, cache = self.model.forward_with_cache(input_ids)
         handles = [
-            self._store_cache(self._slice_cache(cache, batch_index, seq_len=length))
+            self._store_cache(self._slice_cache(cache, batch_index, seq_len=length), token_ids=batch_token_ids[batch_index])
             for batch_index, length in enumerate(lengths)
         ]
         return BatchModelOutput(
@@ -78,7 +106,7 @@ class Qwen3TorchBackend:
 
     @torch.inference_mode()
     def decode_step(self, token_id: int, past_key_values: KVCacheHandle) -> ModelOutput:
-        input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.device)
+        input_ids = self._token_tensor([[token_id]])
         cache = self._load_cache(past_key_values)
         logits, cache = self.model.forward_with_cache(input_ids, past_key_values=cache)
         handle = self._store_cache(
@@ -124,7 +152,7 @@ class Qwen3TorchBackend:
         past_key_values: list[object | None],
     ) -> BatchModelOutput:
         handles = [self._expect_handle(handle) for handle in past_key_values]
-        input_ids = torch.tensor([[token_id] for token_id in token_ids], dtype=torch.long, device=self.device)
+        input_ids = self._token_tensor([[token_id] for token_id in token_ids])
         cache = self._load_batch_cache(handles)
         logits, cache = self.model.forward_with_cache(input_ids, past_key_values=cache)
         new_handles = [
@@ -149,6 +177,7 @@ class Qwen3TorchBackend:
         cache: Qwen3KVCache,
         seq_id: int | None = None,
         append_from: int = 0,
+        token_ids: list[int] | None = None,
     ) -> KVCacheHandle:
         seq_id = next(self._cache_ids) if seq_id is None else seq_id
         for layer_id, (key, value) in enumerate(cache.key_values):
@@ -202,3 +231,23 @@ class Qwen3TorchBackend:
         if not isinstance(handle, KVCacheHandle):
             raise TypeError(f"expected KVCacheHandle, got {type(handle).__name__}")
         return handle
+
+    def _token_tensor(self, data) -> torch.Tensor:
+        tensor = torch.tensor(data, dtype=torch.long)
+        return self._to_device(tensor)
+
+    def _full_token_tensor(self, shape: tuple[int, int], fill_value: int) -> torch.Tensor:
+        tensor = torch.full(shape, fill_value, dtype=torch.long)
+        return self._to_device(tensor)
+
+    def _to_device(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.device.type != "cuda":
+            return tensor.to(self.device)
+        if self.use_pinned_memory:
+            tensor = tensor.pin_memory()
+        if self.transfer_stream is None:
+            return tensor.to(self.device, non_blocking=self.use_pinned_memory)
+        with torch.cuda.stream(self.transfer_stream):
+            moved = tensor.to(self.device, non_blocking=True)
+        torch.cuda.current_stream(self.device).wait_stream(self.transfer_stream)
+        return moved

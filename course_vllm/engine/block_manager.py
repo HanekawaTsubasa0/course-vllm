@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from math import ceil
 
 
@@ -9,6 +10,7 @@ class Block:
     block_id: int
     ref_count: int = 0
     token_hash: int | None = None
+    token_ids: tuple[int, ...] | None = None
 
     @property
     def is_free(self) -> bool:
@@ -19,6 +21,7 @@ class Block:
 class BlockTable:
     block_size: int
     block_ids: list[int] = field(default_factory=list)
+    owned_block_ids: set[int] = field(default_factory=set)
     length: int = 0
 
     def required_blocks(self, new_length: int) -> int:
@@ -37,6 +40,7 @@ class BlockManager:
         self.blocks = [Block(block_id=i) for i in range(num_blocks)]
         self.free_block_ids = list(range(num_blocks))
         self.tables: dict[int, BlockTable] = {}
+        self.hash_to_block_id: dict[int, int] = {}
 
     @property
     def num_free_blocks(self) -> int:
@@ -46,12 +50,21 @@ class BlockManager:
     def num_used_blocks(self) -> int:
         return len(self.blocks) - self.num_free_blocks
 
-    def allocate(self, seq_id: int, num_tokens: int) -> BlockTable:
+    @property
+    def total_blocks(self) -> int:
+        return len(self.blocks)
+
+    def allocate(self, seq_id: int, num_tokens: int, *, token_ids: list[int] | None = None) -> BlockTable:
         if seq_id in self.tables:
             raise ValueError(f"sequence {seq_id} already has a block table")
         table = BlockTable(block_size=self.block_size)
         self.tables[seq_id] = table
-        self.ensure_capacity(seq_id, num_tokens)
+        if token_ids is None:
+            self.ensure_capacity(seq_id, num_tokens)
+        else:
+            if len(token_ids) != num_tokens:
+                raise ValueError("token_ids length must match num_tokens")
+            self._allocate_with_prefix_cache(table, token_ids)
         table.length = num_tokens
         return table
 
@@ -67,10 +80,9 @@ class BlockManager:
                 f"not enough KV blocks: need {missing}, free {self.num_free_blocks}"
             )
         for _ in range(missing):
-            block_id = self.free_block_ids.pop()
-            block = self.blocks[block_id]
-            block.ref_count = 1
+            block_id = self._allocate_fresh_block()
             table.block_ids.append(block_id)
+            table.owned_block_ids.add(block_id)
         table.length = max(table.length, new_length)
         return table
 
@@ -100,5 +112,82 @@ class BlockManager:
             if block.ref_count < 0:
                 raise RuntimeError(f"negative ref_count for block {block_id}")
             if block.ref_count == 0:
-                block.token_hash = None
                 self.free_block_ids.append(block_id)
+
+    def usage_stats(self) -> dict:
+        allocated_slots = sum(len(table.block_ids) * self.block_size for table in self.tables.values())
+        live_tokens = sum(table.length for table in self.tables.values())
+        wasted_slots = allocated_slots - live_tokens
+        return {
+            "total_blocks": self.total_blocks,
+            "free_blocks": self.num_free_blocks,
+            "used_blocks": self.num_used_blocks,
+            "block_size": self.block_size,
+            "active_sequences": len(self.tables),
+            "live_tokens": live_tokens,
+            "allocated_slots": allocated_slots,
+            "wasted_slots": wasted_slots,
+            "fragmentation_ratio": wasted_slots / allocated_slots if allocated_slots else 0.0,
+            "prefix_cached_blocks": sum(1 for block in self.blocks if block.ref_count > 1),
+            "cached_free_blocks": sum(1 for block in self.blocks if block.ref_count == 0 and block.token_hash is not None),
+        }
+
+    def _allocate_with_prefix_cache(self, table: BlockTable, token_ids: list[int]) -> None:
+        prefix_hash = -1
+        for start in range(0, len(token_ids), self.block_size):
+            block_tokens = tuple(token_ids[start : start + self.block_size])
+            if len(block_tokens) == self.block_size:
+                token_hash = self._block_hash(block_tokens, prefix_hash)
+                cached_block_id = self.hash_to_block_id.get(token_hash)
+                if cached_block_id is not None and self.blocks[cached_block_id].token_ids == block_tokens:
+                    self._claim_cached_block(cached_block_id)
+                    table.block_ids.append(cached_block_id)
+                    prefix_hash = token_hash
+                    continue
+                block_id = self._allocate_fresh_block()
+                block = self.blocks[block_id]
+                block.token_hash = token_hash
+                block.token_ids = block_tokens
+                self.hash_to_block_id[token_hash] = block_id
+                table.block_ids.append(block_id)
+                table.owned_block_ids.add(block_id)
+                prefix_hash = token_hash
+            else:
+                block_id = self._allocate_fresh_block()
+                table.block_ids.append(block_id)
+                table.owned_block_ids.add(block_id)
+
+    def _allocate_fresh_block(self) -> int:
+        if not self.free_block_ids:
+            raise RuntimeError("not enough KV blocks: need 1, free 0")
+        free_index = None
+        for index in range(len(self.free_block_ids) - 1, -1, -1):
+            if self.blocks[self.free_block_ids[index]].token_hash is None:
+                free_index = index
+                break
+        if free_index is None:
+            block_id = self.free_block_ids.pop()
+        else:
+            block_id = self.free_block_ids.pop(free_index)
+        block = self.blocks[block_id]
+        if block.token_hash is not None and self.hash_to_block_id.get(block.token_hash) == block_id:
+            del self.hash_to_block_id[block.token_hash]
+        block.ref_count = 1
+        block.token_hash = None
+        block.token_ids = None
+        return block_id
+
+    def _claim_cached_block(self, block_id: int) -> None:
+        block = self.blocks[block_id]
+        if block.ref_count == 0:
+            self.free_block_ids.remove(block_id)
+            block.ref_count = 1
+        else:
+            block.ref_count += 1
+
+    def _block_hash(self, token_ids: tuple[int, ...], prefix_hash: int) -> int:
+        hasher = hashlib.blake2b(digest_size=8)
+        hasher.update(prefix_hash.to_bytes(8, "little", signed=True))
+        for token_id in token_ids:
+            hasher.update(int(token_id).to_bytes(8, "little", signed=True))
+        return int.from_bytes(hasher.digest(), "little")

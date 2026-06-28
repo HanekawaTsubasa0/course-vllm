@@ -58,15 +58,27 @@ class BatchingEngine:
         max_batch_size: int = 8,
         batch_wait_ms: float = 2.0,
         max_num_batched_tokens: int = 2048,
+        max_queue_size: int | None = None,
+        max_prompt_chars: int | None = None,
+        enable_chunked_prefill: bool = False,
+        cache_aware_scheduling: bool = False,
     ):
         if max_batch_size <= 0:
             raise ValueError("max_batch_size must be > 0")
         if batch_wait_ms < 0:
             raise ValueError("batch_wait_ms must be >= 0")
+        if max_queue_size is not None and max_queue_size <= 0:
+            raise ValueError("max_queue_size must be > 0 when provided")
+        if max_prompt_chars is not None and max_prompt_chars <= 0:
+            raise ValueError("max_prompt_chars must be > 0 when provided")
         self.engine = engine
         self.max_batch_size = max_batch_size
         self.batch_wait_s = batch_wait_ms / 1000.0
         self.max_num_batched_tokens = max_num_batched_tokens
+        self.max_queue_size = max_queue_size
+        self.max_prompt_chars = max_prompt_chars
+        self.enable_chunked_prefill = enable_chunked_prefill
+        self.cache_aware_scheduling = cache_aware_scheduling
         self._queue: asyncio.Queue[_QueueItem | None] = asyncio.Queue()
         self._pending: deque[_QueueItem | None] = deque()
         self._worker: asyncio.Task | None = None
@@ -93,6 +105,7 @@ class BatchingEngine:
 
     async def generate(self, prompt: str, sampling_params: SamplingParams) -> dict:
         await self.start()
+        self._admit(prompt)
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         await self._queue.put(_QueueItem(prompt=prompt, sampling_params=sampling_params, future=future))
@@ -100,6 +113,7 @@ class BatchingEngine:
 
     async def stream(self, prompt: str, sampling_params: SamplingParams) -> AsyncIterator[dict]:
         await self.start()
+        self._admit(prompt)
         events: queue.Queue[dict | BaseException | None] = queue.Queue()
 
         def run_stream() -> None:
@@ -156,6 +170,8 @@ class BatchingEngine:
                 batch[0].sampling_params,
                 max_num_seqs=self.max_batch_size,
                 max_num_batched_tokens=self.max_num_batched_tokens,
+                enable_chunked_prefill=self.enable_chunked_prefill,
+                cache_aware_scheduling=self.cache_aware_scheduling,
             )
         except Exception as exc:
             for item in batch:
@@ -177,7 +193,22 @@ class BatchingEngine:
         return self._queue.get_nowait()
 
     def stats_dict(self) -> dict:
-        return self.stats.as_dict(queue_depth=self._queue.qsize() + len(self._pending))
+        stats = self.stats.as_dict(queue_depth=self._queue.qsize() + len(self._pending))
+        stats["max_queue_size"] = self.max_queue_size
+        stats["max_prompt_chars"] = self.max_prompt_chars
+        stats["enable_chunked_prefill"] = self.enable_chunked_prefill
+        stats["cache_aware_scheduling"] = self.cache_aware_scheduling
+        return stats
+
+    def _admit(self, prompt: str) -> None:
+        if self.max_prompt_chars is not None and len(prompt) > self.max_prompt_chars:
+            raise ValueError(
+                f"prompt too long: {len(prompt)} chars exceeds max_prompt_chars={self.max_prompt_chars}"
+            )
+        if self.max_queue_size is not None:
+            depth = self._queue.qsize() + len(self._pending)
+            if depth >= self.max_queue_size:
+                raise RuntimeError(f"request queue is full: depth={depth}, max_queue_size={self.max_queue_size}")
 
     async def _run_model(self, fn: Callable, *args, **kwargs):
         result_queue: queue.Queue = queue.Queue(maxsize=1)

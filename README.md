@@ -13,6 +13,27 @@
 
 主工程路径就是当前仓库根目录。
 
+## 教学进度开关
+
+工程显式暴露课程阶段和算子实现开关：
+
+```bash
+--stage week04
+--kernel-impl torch|auto|cuda
+```
+
+- `stage` 用来标记当前实验周次，`/health` 会返回对应周次、主题、代码状态和测试提示。
+- `kernel-impl=torch` 保持纯 PyTorch/reference 路径。
+- `kernel-impl=auto` 在 CUDA tensor 上优先尝试课程 CUDA kernel，失败时回退 PyTorch。
+- `kernel-impl=cuda` 要求走课程 CUDA kernel，kernel 不可用时直接报错，适合检查是否真的接入。
+
+周次说明在 `docs/labs/`，性能分析和系统报告模板在 `docs/reports/`。
+
+完整课程使用文档：
+
+- `docs/course_teaching_runbook.md`：教师/助教逐周上课运行手册。
+- `docs/runnable_validation_guide.md`：正确性、profiling、benchmark、报告产物的可复现验收指南。
+
 ## 环境配置
 
 进入项目并创建虚拟环境：
@@ -80,6 +101,8 @@ dependence/gcc14-root/usr/bin/x86_64-linux-gnu-g++-14
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
   --backend paged \
+  --stage week04 \
+  --kernel-impl auto \
   --chat \
   --prompt "用一句话介绍你自己。" \
   --temperature 0
@@ -91,6 +114,8 @@ python examples/offline_generate.py \
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
   --backend paged \
+  --stage week04 \
+  --kernel-impl auto \
   --chat \
   --prompt "用一句话介绍你自己。" \
   --max-tokens 128 \
@@ -105,6 +130,8 @@ python examples/offline_generate.py \
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
   --backend paged \
+  --stage week04 \
+  --kernel-impl auto \
   --prompts "Hello|What is KV cache?" \
   --max-tokens 64 \
   --temperature 0
@@ -131,9 +158,17 @@ source .venv/bin/activate
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
   --backend paged \
+  --stage week11 \
+  --kernel-impl auto \
   --dtype bfloat16 \
   --max-batch-size 8 \
   --batch-wait-ms 2 \
+  --max-queue-size 128 \
+  --max-prompt-chars 8192 \
+  --enable-chunked-prefill \
+  --cache-aware-scheduling \
+  --pinned-memory \
+  --transfer-stream \
   --port 18080
 ```
 
@@ -143,7 +178,7 @@ python -m course_vllm.server.api \
 curl -s http://127.0.0.1:18080/health
 ```
 
-`/health` 会返回模型、backend、batching 统计信息，包括 total requests、total batches、平均 batch size 和 queue depth。
+`/health` 会返回模型、backend、课程 stage、kernel 实现、batching 统计信息，包括 total requests、total batches、平均 batch size、queue depth、chunked prefill 和 cache-aware scheduling 开关。
 
 ### `/generate`
 
@@ -236,7 +271,65 @@ python -m course_vllm.benchmarks.bench_server \
   --url http://127.0.0.1:18080/generate \
   --num-requests 16 \
   --concurrency 4 \
-  --max-tokens 16
+  --max-tokens 16 \
+  --json
+```
+
+该 benchmark 输出 `requests/s`、`output_tokens/s`、`latency p50/p90/p99` 和估算 `TPOT`。
+
+容量规划工具：
+
+```bash
+python -m course_vllm.benchmarks.capacity_planner \
+  --gpu-memory-gb 24 \
+  --weight-memory-gb 2 \
+  --num-layers 28 \
+  --num-kv-heads 8 \
+  --head-dim 128 \
+  --block-size 16 \
+  --max-model-len 2048
+```
+
+生成第十三节容量规划报告：
+
+```bash
+python -m course_vllm.benchmarks.capacity_planner \
+  --gpu-memory-gb 24 \
+  --weight-memory-gb 2 \
+  --num-layers 28 \
+  --num-kv-heads 8 \
+  --head-dim 128 \
+  --target-concurrency 32 \
+  --target-sequence-len 2048 \
+  --report
+```
+
+性能分析脚本：
+
+```bash
+bash scripts/profile/nsys_server.sh
+bash scripts/profile/ncu_kernel.sh
+python scripts/profile/torch_profiler.py --backend paged --max-tokens 8
+python -m course_vllm.benchmarks.system_optimization --pinned-memory --transfer-stream
+```
+
+按周自动检查：
+
+```bash
+python -m course_vllm.benchmarks.grader week05
+python -m course_vllm.benchmarks.grader week07
+python -m course_vllm.benchmarks.grader week11
+python -m course_vllm.benchmarks.grader week12
+python -m course_vllm.benchmarks.grader week13
+python -m course_vllm.benchmarks.grader week15
+```
+
+第十五节 cache-aware serving 最小复现实验：
+
+```bash
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "cache-aware serving" \
+  --prompts "1,2,3,4|1,2,3,9|8,7|1,2,5"
 ```
 
 ## 正确性验证
@@ -256,10 +349,10 @@ pytest -q tests/test_kernels.py tests/test_attention.py -rs
   -> 12 passed
 ```
 
-当前新增 CLI 和默认无上限改动后，普通沙箱下：
+当前课程化改造后，普通沙箱下：
 
 ```text
-44 passed, 9 skipped
+68 passed, 9 skipped
 ```
 
 ### Qwen3 / HuggingFace 对齐
@@ -435,6 +528,9 @@ CUDA 代码在 `kernels/course_ops.cu`：
 - RMSNorm
 - Qwen-style RoPE
 - naive matmul
+- tiled matmul
+- dense prefill attention
+- dense decode attention
 - paged attention decode
 
 `kernels/course_ops.cpp` 做 PyTorch binding、tensor shape/dtype/device 检查和 kernel launcher 调用。
@@ -446,6 +542,9 @@ cuda_softmax
 cuda_rms_norm
 cuda_rope
 cuda_matmul
+cuda_matmul_tiled
+cuda_dense_attention_prefill
+cuda_dense_attention_decode
 cuda_paged_attention_decode
 ```
 
@@ -457,7 +556,7 @@ paged attention decode 在 CUDA 可用且满足限制时走手写 CUDA kernel；
 - 不是工业级多 worker / 多 GPU serving。
 - streaming 请求当前通过单 model worker 串行执行。
 - CUDA kernels 是教学实现，重点是正确性和可读性，不追求极限性能。
-- profiler、capacity planning、course mapping、多卡讲解和 AscendC 文档还未整理完成。
+- AscendC 暂缓，等待后续硬件/后端条件后再补。
 
 ## 参考项目
 

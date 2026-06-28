@@ -35,6 +35,9 @@ class Sequence:
     past_key_values: object | None = None
     next_token_id: int | None = None
     finish_reason: str | None = None
+    prefill_offset: int = 0
+    scheduled_start: int = 0
+    scheduled_end: int = 0
 
     @property
     def request_id(self) -> int:
@@ -46,6 +49,12 @@ class Sequence:
 
     def append_token(self, token_id: int) -> None:
         self.generated_token_ids.append(int(token_id))
+
+    def scheduled_prompt_tokens(self) -> list[int]:
+        return self.prompt_token_ids[self.scheduled_start : self.scheduled_end]
+
+    def prefill_complete(self) -> bool:
+        return self.prefill_offset >= len(self.prompt_token_ids)
 
     def reached_max_tokens(self) -> bool:
         max_tokens = self.request.sampling_params.max_tokens

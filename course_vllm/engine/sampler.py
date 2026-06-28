@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import torch
 
+from course_vllm.kernels.errors import KernelUnavailable
+
 
 @dataclass(slots=True)
 class SamplingParams:
@@ -31,7 +33,7 @@ class Sampler:
             self.generator.manual_seed(params.seed)
 
     def sample(self, logits: torch.Tensor) -> int:
-        logits = logits.float().detach().cpu()
+        logits = logits.float().detach()
         if logits.ndim == 2:
             logits = logits[-1]
         if logits.ndim != 1:
@@ -43,10 +45,20 @@ class Sampler:
         logits = logits / self.params.temperature
         if self.params.top_k is not None and self.params.top_k < logits.numel():
             values, indices = torch.topk(logits, self.params.top_k)
-            probs = torch.softmax(values, dim=-1)
-            selected = torch.multinomial(probs, num_samples=1, generator=self.generator)
+            probs = self._softmax(values)
+            selected = torch.multinomial(probs.cpu(), num_samples=1, generator=self.generator)
             return int(indices[selected].item())
 
-        probs = torch.softmax(logits, dim=-1)
-        selected = torch.multinomial(probs, num_samples=1, generator=self.generator)
+        probs = self._softmax(logits)
+        selected = torch.multinomial(probs.cpu(), num_samples=1, generator=self.generator)
         return int(selected.item())
+
+    def _softmax(self, logits: torch.Tensor) -> torch.Tensor:
+        if logits.is_cuda:
+            try:
+                from course_vllm.kernels.cuda_ops import cuda_softmax
+
+                return cuda_softmax(logits.reshape(1, -1)).reshape(-1)
+            except KernelUnavailable:
+                pass
+        return torch.softmax(logits.cpu(), dim=-1)

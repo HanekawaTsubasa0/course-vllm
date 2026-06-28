@@ -126,3 +126,36 @@ def test_engine_generate_batch_prefers_backend_decode_batch():
     )
 
     assert engine.backend.decode_batch_calls == 2
+
+
+def test_engine_generate_batch_cache_aware_keeps_input_order():
+    engine = object.__new__(Engine)
+    engine.backend = FakeBatchBackend()
+    engine.backend_name = "fake"
+
+    results = engine.generate_batch(
+        ["abcd", "x", "abce"],
+        SamplingParams(temperature=0.0, max_tokens=1),
+        max_num_seqs=3,
+        max_num_batched_tokens=16,
+        cache_aware_scheduling=True,
+    )
+
+    assert [result["text"] for result in results] == ["E", "B", "E"]
+    assert engine.backend.prefill_batch_calls == 1
+
+
+def test_engine_info_reports_course_stage_and_kernel_impl():
+    engine = object.__new__(Engine)
+    engine.backend = FakeBackend()
+    engine.backend_name = "fake"
+    engine.stage = "week04"
+    engine.kernel_impl = "auto"
+    engine.use_pinned_memory = False
+    engine.use_transfer_stream = False
+
+    info = engine.info()
+
+    assert info["backend"] == "fake"
+    assert info["kernel_impl"] == "auto"
+    assert info["stage"]["key"] == "week04"

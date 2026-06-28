@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import torch
 from torch.nn import functional as F
 
-from course_vllm.kernels import KernelUnavailable
+from course_vllm.kernels.errors import KernelUnavailable
 from course_vllm.model.qwen3_torch import repeat_kv
 
 

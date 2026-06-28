@@ -23,6 +23,7 @@ def main() -> None:
         print_sequence(manager, seq_id)
 
     print(f"used={manager.num_used_blocks} free={manager.num_free_blocks}")
+    print_stats(manager)
     print("decode")
     for step in range(args.decode_steps):
         print(f"step={step + 1}")
@@ -30,6 +31,7 @@ def main() -> None:
             manager.append_tokens(seq_id=seq_id, num_new_tokens=1)
             print_sequence(manager, seq_id)
         print(f"used={manager.num_used_blocks} free={manager.num_free_blocks}")
+        print_stats(manager)
 
 
 def print_sequence(manager: BlockManager, seq_id: int) -> None:
@@ -39,6 +41,17 @@ def print_sequence(manager: BlockManager, seq_id: int) -> None:
     print(
         f"  seq={seq_id} len={table.length} "
         f"blocks={table.block_ids} slots={slots}"
+    )
+
+
+def print_stats(manager: BlockManager) -> None:
+    stats = manager.usage_stats()
+    print(
+        "  stats="
+        f"live_tokens={stats['live_tokens']} "
+        f"allocated_slots={stats['allocated_slots']} "
+        f"wasted_slots={stats['wasted_slots']} "
+        f"fragmentation_ratio={stats['fragmentation_ratio']:.3f}"
     )
 
 
