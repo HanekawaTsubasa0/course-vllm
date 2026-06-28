@@ -4,6 +4,8 @@
 
 本文档是学生入口，只使用相对路径、示例命令、实验任务和交付物；不包含 TA 本机路径、硬件型号、一次性 profiler 结果或发布前验收记录。
 
+Week 03、Week 04、Week 07 已扩成正式 handout 样板，包含“背景概念、读什么、改什么、测什么、报告问题、常见坑、交付物”。其余周次后续按同一结构扩展。
+
 | 周次 | 主题 | 代码状态 | 主要入口 |
 | --- | --- | --- | --- |
 | week01 | 课程导论与 baseline serving | implemented | `course_vllm.server.api` |
@@ -39,3 +41,5 @@ python -m course_vllm.benchmarks.grader cuda_smoke
 ```
 
 第十四节 AscendC 当前按项目决策暂缓，仓库内不放本地后端或样例；后续有硬件/后端后再补真实算子和对照文档。
+
+学生 starter branch 的生成计划见 `docs/student_branch_plan.md`。正式发学生前，应从完整 `main` 生成 `student` 分支，而不是直接发布完整答案。

@@ -994,6 +994,8 @@ ERR_NVGPUCTRPERM
 | 服务 API | `course_vllm/server/api.py` |
 | 实验文档 | `docs/labs/week*.md` |
 | 报告模板 | `docs/reports/*.md` |
+| 学生分支计划 | `docs/student_branch_plan.md` |
+| TA 验证记录 | `docs/validation/ta_validation_log.md` |
 | 运行验收 | `docs/runnable_validation_guide.md` |
 
 ## 19. TA validation log

@@ -1,139 +1,114 @@
-# Week 16 综合实验报告
+# Week 16 综合实验报告模板
 
-## 系统概览
+本文档是学生最终报告模板。请只填写自己的实验环境、命令、指标、截图和分析，不要复制 TA validation log 中的一次性实测数字。
 
-- backend: paged
-- model: Qwen/Qwen3-0.6B
-- dtype: bfloat16 for serving, float32 for strict HF alignment
-- kernel_impl: auto
-- supported endpoints: `/health`, `/generate`, `/v1/chat/completions`
-- AscendC: deferred by course decision
+## 1. 系统概览
 
-## 正确性证据
+| 项目 | 填写 |
+| --- | --- |
+| backend |  |
+| model |  |
+| dtype |  |
+| kernel_impl |  |
+| GPU / CUDA / PyTorch |  |
+| supported endpoints |  |
+| AscendC 状态 |  |
 
-```bash
-pytest -q -rs
-```
+简要说明你的系统如何串联 prefill、decode、KV cache、paged KV、scheduler、HTTP serving 和 sampling。
 
-本次结果：
+## 2. 正确性证据
 
-```text
-85 passed in 5.33s
-```
+填写你实际运行的测试命令和结果。
 
-CUDA kernel 和 attention：
+| 检查项 | 命令 | 结果摘要 |
+| --- | --- | --- |
+| full pytest | `pytest -q -rs` |  |
+| stage grader | `python -m course_vllm.benchmarks.grader <week>` |  |
+| CUDA smoke | `python -m course_vllm.benchmarks.grader cuda_smoke` |  |
+| Qwen3/HF alignment | `python validation/compare_qwen3.py ...` |  |
 
-```bash
-pytest -q tests/test_kernels.py tests/test_attention.py -rs
-```
+回答：
 
-本次结果：
+1. 哪些测试是 correctness oracle？
+2. 哪些测试只是 smoke test？
+3. 如果 CUDA smoke 没有运行，原因是什么？这对你的结论有什么影响？
 
-```text
-16 passed in 17.41s
-```
+## 3. 性能证据
 
-## Qwen3/HF Alignment
+填写 profiler 和 benchmark 结果。
 
-```bash
-for mode in forward decode batch-prefill batch-decode; do
-  echo "=== $mode ==="
-  python validation/compare_qwen3.py "$mode" \
-    --model Qwen/Qwen3-0.6B \
-    --backend paged \
-    --dtype float32
-done | tee profiles/reports/qwen3_alignment_float32.txt
-```
+| 工具 | 产物路径或截图 | 主要发现 |
+| --- | --- | --- |
+| torch profiler |  |  |
+| nsys |  |  |
+| ncu |  |  |
+| HTTP benchmark |  |  |
 
-最大误差摘要：
+至少回答：
 
-- forward: 0.000000
-- decode: 0.000026
-- batch-prefill course batch vs single: 0.000043
-- batch-prefill course single vs HF: 0.000029
-- batch-decode course vs HF batch: 0.000020
+1. 主要耗时在 Python、GPU kernel、memcpy 还是同步等待？
+2. prefill 和 decode 的瓶颈是否相同？
+3. 你会优先优化哪个模块？为什么？
 
-结论：float32 逻辑路径与 HF eager 实现对齐。
+## 4. Week 12 优化对比
 
-## 性能证据
+| 配置 | requests/s | output tokens/s | p50 | p90 | p99 | estimated TPOT | 结论 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline |  |  |  |  |  |  |  |
+| optimized |  |  |  |  |  |  |  |
 
-Torch profiler:
+回答：
 
-- `matmul_tiled_kernel<bf16>`: 54.790 ms self CUDA
-- `paged_attention_decode_kernel`: 1.145 ms self CUDA
-- `rms_norm_kernel<bf16>`: 2.088 ms self CUDA
-- `rope_kernel<bf16>`: 471.293 us self CUDA
+1. 你的 workload 是短 prompt 还是长 prompt？并发是多少？
+2. pinned memory、transfer stream、chunked prefill、cache-aware scheduling 中哪些可能影响结果？
+3. 如果优化收益不明显，给出至少两个可能原因。
 
-Nsight Systems:
+## 5. 容量规划
 
-- 产物：`profiles/nsys_server_ready.nsys-rep`
-- requests/s: 1.430951
-- output tokens/s: 11.447604
-- p99: 1.710348 s
+| 项目 | 数值 |
+| --- | ---: |
+| GPU memory |  |
+| weight memory |  |
+| KV budget |  |
+| KV blocks |  |
+| token slots |  |
+| target concurrency |  |
+| target sequence length |  |
 
-Nsight Compute:
+判断：当前目标是否需要更多 KV 容量、tensor parallelism 或 pipeline parallelism？说明依据。
 
-- 命令可启动，但当前用户缺少 performance counter 权限。
-- 输出：`ERR_NVGPUCTRPERM`
-- CUDA correctness in NCU process: `16 passed`
+## 6. 前沿机制映射
 
-## 优化对比
+选择一个机制，例如 cache-aware serving、prefill/decode disaggregation 或 TokenDance-style scheduling。
 
-| 阶段 | 改动 | requests/s | tokens/s | p50 | p90 | p99 | 结论 |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| baseline | paged backend, week11 | 4.038430 | 32.307436 | 0.231115 | 1.245282 | 1.248274 | 可运行 baseline |
-| system optimization | pinned memory, transfer stream, chunked prefill, cache-aware scheduling | 3.981867 | 31.854933 | 0.251096 | 1.216504 | 1.219466 | 短负载收益不明显，p99 略好 |
+| 项目 | 填写 |
+| --- | --- |
+| 机制名称 |  |
+| 论文/资料来源 |  |
+| 影响的 engine modules |  |
+| 需要新增或修改的数据结构 |  |
+| 目标指标 |  |
+| demo 或实验结果 |  |
 
-## 容量规划
+说明该机制在本课程工程中是完整实现、教学近似，还是 paper-to-system 设计草案。
 
-- GPU memory: 24 GiB
-- KV budget: 17.400 GiB
-- KV blocks: 10,181
-- token slots: 162,896
-- target concurrency: 32
-- target sequence length: 2048
-- 判断：不需要为了该目标引入 tensor/pipeline parallelism。
+## 7. 故障诊断复盘
 
-## 前沿机制复现
+选择一次你实际遇到的问题。
 
-cache-aware serving demo:
+| 项目 | 填写 |
+| --- | --- |
+| 现象 |  |
+| 初始假设 |  |
+| 定位证据 |  |
+| 修复或规避方式 |  |
+| 验证命令 |  |
+| 剩余风险 |  |
 
-- baseline shared-prefix score: 3
-- cache-aware shared-prefix score: 5
-- mapped modules: `engine/policies.py`, `engine/block_manager.py`, `engine/engine.py`
+## 8. 最终总结
 
-## 故障诊断复盘
+用 300-500 字总结：
 
-现象：
-
-- 默认沙箱下 `torch.cuda.is_available()` 为 False，CUDA 测试跳过。
-- 直接用 `Qwen/Qwen3-0.6B` 跑课程 backend 时，早期版本只在当前目录找 `config.json`。
-- `nsys_server.sh` 固定 sleep 5 秒，模型加载未完成时 benchmark 连接失败。
-- `ncu` 不在 PATH。
-
-定位证据：
-
-- 提升权限下 `nvidia-smi` 显示 2 x RTX 4090。
-- PyTorch CUDA build 为 `2.8.0+cu128`。
-- HF cache 有 Qwen3 snapshot。
-- `find /usr/local -path '*ncu'` 找到 `/usr/local/cuda-12.8/bin/ncu`。
-
-修复：
-
-- 在 GPU 可见环境重跑测试。
-- 增加 `resolve_local_model_path`，支持 repo id 到本地 HF snapshot。
-- `nsys_server.sh` 改为轮询 `/health`。
-- profile 脚本自动查找 `ncu/nsys` 常见路径。
-
-验证：
-
-- 全量测试 `85 passed`。
-- CUDA/attention 测试 `16 passed`。
-- Qwen3/HF float32 对齐通过。
-- nsys 生成 `profiles/nsys_server_ready.nsys-rep`。
-
-剩余风险：
-
-- NCU performance counters 需要管理员权限。
-- 当前 benchmark 是小样本短负载，不能代表工业吞吐极限。
-- 教学 CUDA kernel 重 correctness/readability，不追求超过 cuBLAS/FlashAttention。
+1. 你实现或理解最深入的模块。
+2. 你认为当前工程距离工业级 vLLM/SGLang 还差什么。
+3. 如果继续迭代两周，你会优先做什么。
