@@ -9,6 +9,8 @@ export PORT
 
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"
+elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 else
   PYTHON_BIN=""
   for candidate in python3.12 python3.11 python3.10; do
