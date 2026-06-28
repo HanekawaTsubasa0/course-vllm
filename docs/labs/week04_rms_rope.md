@@ -11,6 +11,12 @@
 
 `auto` 会在 CUDA tensor 上尝试课程 CUDA kernel，失败时回退 PyTorch；`cuda` 会在 kernel 不可用时直接报错，适合检查是否真的接入。
 
+## TODO(lab04)
+
+- Edit: `kernels/course_ops.cu` 中 RMSNorm/RoPE kernel 对应实现。
+- Edit if needed: `course_vllm/kernels/cuda_ops.py::cuda_rms_norm`、`cuda_rope` wrapper。
+- Integration check: `course_vllm/model/qwen3_torch.py::Qwen3RMSNorm.forward` 和 `apply_rotary_pos_emb` 的 `kernel_impl` 分支。
+
 ## 验证
 
 ```bash

@@ -10,6 +10,12 @@
 - `Engine.generate_batch(..., enable_chunked_prefill=True)`
 - HTTP 服务：`--enable-chunked-prefill`
 
+## TODO(lab11)
+
+- Edit: `course_vllm/engine/scheduler.py` 中 waiting/running 队列、chunked prefill、preemption。
+- Edit: `course_vllm/server/batching.py` 中 HTTP batching queue 和 admission metadata。
+- Keep boundary: 不实现多 worker、多 GPU 或生产级公平性策略。
+
 ## 验证
 
 ```bash

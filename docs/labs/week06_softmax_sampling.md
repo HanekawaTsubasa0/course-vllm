@@ -16,6 +16,12 @@
 3. 在 CUDA 可用时让 sampling softmax 走 `cuda_softmax`。
 4. 记录 greedy、temperature、top-k 三种采样路径。
 
+## TODO(lab06)
+
+- Edit: `kernels/course_ops.cu` 中 row-wise stable softmax。
+- Edit if needed: `course_vllm/engine/sampler.py` 中 logits softmax dispatch。
+- Keep reference: greedy、temperature、top-k 语义不能改变，只替换 softmax 计算路径。
+
 ## 验证
 
 ```bash

@@ -23,6 +23,12 @@
 3. 运行最小复现实验，例如 cache-aware order 的 shared-prefix score。
 4. 说明如何把机制从 demo 推进到完整服务主路径。
 
+## TODO(lab15)
+
+- Edit/report: `docs/reports/week15_paper_to_system_template.md`。
+- Run/inspect: `course_vllm/benchmarks/cache_aware_demo.py` 和 `course_vllm/engine/policies.py`。
+- Optional edit: 可新增一个小型 policy demo，但必须说明它和生产 scheduler 的差距。
+
 ## 建议命令
 
 ```bash

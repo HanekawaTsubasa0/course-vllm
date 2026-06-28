@@ -21,6 +21,12 @@
 3. 对照 PyTorch `a @ b`，解释为什么教学 kernel 不追求超过 cuBLAS。
 4. 用 `--kernel-impl cuda` 验证投影层确实走课程 kernel。
 
+## TODO(lab05)
+
+- Edit: `kernels/course_ops.cu` 中 naive matmul 和 tiled matmul kernel。
+- Edit if needed: `course_vllm/model/ops.py::CourseLinear.forward` 的 CUDA dispatch。
+- Keep reference: 不改 PyTorch `linear`/`matmul` reference，用它做 correctness oracle。
+
 ## 验证
 
 ```bash

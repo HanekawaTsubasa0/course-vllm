@@ -15,6 +15,12 @@
 3. 结合目标 concurrency 和 sequence length 判断单卡是否足够。
 4. 如果单卡不足，说明应优先增加 KV 容量、张量并行还是流水并行。
 
+## TODO(lab13)
+
+- Edit/report: `docs/reports/week13_capacity_planning_template.md`。
+- Run/inspect: `course_vllm/benchmarks/capacity_planner.py`，理解 KV block、token slots、并发上限计算。
+- Optional edit: 只允许扩展 planner 参数或报告字段，不改 serving 主路径。
+
 ## 建议命令
 
 ```bash

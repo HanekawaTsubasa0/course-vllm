@@ -10,6 +10,12 @@
 - `scripts/profile/torch_profiler.py`
 - `docs/reports/week02_profile_template.md`
 
+## TODO(lab02)
+
+- Edit report: `docs/reports/week02_profile_template.md`。
+- Run/inspect: `course_vllm/benchmarks/bench_server.py`、`scripts/profile/torch_profiler.py`、`scripts/profile/nsys_server.sh`。
+- Optional edit: 只允许给 benchmark 输出增加字段或格式化，不改模型/engine 主路径。
+
 ## 建议命令
 
 ```bash

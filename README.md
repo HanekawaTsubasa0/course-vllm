@@ -74,24 +74,13 @@ Qwen/Qwen3-0.6B
 
 ### CUDA 编译依赖
 
-CUDA tests 会通过 PyTorch extension JIT 编译 `kernels/*.cu`。这台机器是 CUDA 12.8，但系统默认 `g++-15` 对 nvcc 的半精度/bfloat16 头文件太新，所以项目把 GCC 14 解包到本地 `dependence/`，不安装到系统：
+CUDA tests 会通过 PyTorch extension JIT 编译 `kernels/*.cu`。运行 CUDA kernel 验收需要 NVIDIA GPU、CUDA toolkit、`ninja`，以及与当前 `nvcc` 兼容的 host C++ compiler。
 
 ```bash
-mkdir -p dependence/debs dependence/gcc14-root
-cd dependence/debs
-apt download g++-14-x86-64-linux-gnu gcc-14-x86-64-linux-gnu cpp-14-x86-64-linux-gnu
-apt download libgcc-14-dev libstdc++-14-dev gcc-14-base
-cd ../..
-for deb in dependence/debs/*.deb; do dpkg-deb -x "$deb" dependence/gcc14-root; done
+python -m course_vllm.benchmarks.grader cuda_smoke
 ```
 
-`course_vllm.kernels.harness` 会自动优先使用：
-
-```text
-dependence/gcc14-root/usr/bin/x86_64-linux-gnu-g++-14
-```
-
-`dependence/` 已写入 `.gitignore`，不会进入 git。
+如果遇到 nvcc 和系统 G++ 版本不兼容、CUDA extension 编译失败或 profiler 权限问题，按 `docs/runnable_validation_guide.md` 的 troubleshooting 处理。
 
 ## 快速运行
 
@@ -342,18 +331,13 @@ python -m course_vllm.benchmarks.cache_aware_demo \
 pytest -q -rs
 ```
 
-如果当前 shell 看不到 CUDA，CUDA 测试会 skip。之前在 CUDA 可见环境已验证过：
+CUDA kernel 接入验收单独运行：
 
-```text
-pytest -q tests/test_kernels.py tests/test_attention.py -rs
-  -> 12 passed
+```bash
+python -m course_vllm.benchmarks.grader cuda_smoke
 ```
 
-当前课程化改造后，普通沙箱下：
-
-```text
-68 passed, 9 skipped
-```
+普通 `pytest -q -rs` 适合基础回归；如果当前 shell 看不到 CUDA，CUDA 相关测试会 skip。
 
 ### Qwen3 / HuggingFace 对齐
 

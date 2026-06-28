@@ -18,6 +18,12 @@
 3. 构造共享完整 block 前缀的 prompt，观察 prefix cache 复用。
 4. 统计 wasted slots 和 fragmentation ratio。
 
+## TODO(lab10)
+
+- Edit: `course_vllm/engine/block_manager.py` 中 block allocate/free、block table、prefix reuse 统计。
+- Edit: `course_vllm/engine/paged_kv_cache.py` 中物理 slot 写入/读取。
+- Keep boundary: prefix cache 是 teaching approximation，不实现生产级 eviction 或跨租户策略。
+
 ## 验证
 
 ```bash

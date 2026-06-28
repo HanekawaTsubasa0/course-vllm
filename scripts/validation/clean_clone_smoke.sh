@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKDIR="${1:-/tmp/course-vllm-clean-smoke}"
 PORT="${PORT:-18180}"
 MODEL="${MODEL:-Qwen/Qwen3-0.6B}"
+REMOTE_URL="${REMOTE_URL:-}"
 export PORT
 
 if [[ -n "${PYTHON:-}" ]]; then
@@ -35,7 +36,7 @@ case "$WORKDIR" in
     ;;
 esac
 
-if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+if [[ -z "$REMOTE_URL" && -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
   echo "Refusing clean-clone smoke from a dirty worktree." >&2
   echo "Commit or stash changes first, then rerun this script." >&2
   exit 2
@@ -43,7 +44,11 @@ fi
 
 rm -rf "$WORKDIR"
 mkdir -p "$WORKDIR"
-git clone "$REPO_ROOT" "$WORKDIR/repo"
+if [[ -n "$REMOTE_URL" ]]; then
+  git clone "$REMOTE_URL" "$WORKDIR/repo"
+else
+  git clone "$REPO_ROOT" "$WORKDIR/repo"
+fi
 cd "$WORKDIR/repo"
 
 "$PYTHON_BIN" -m venv .venv

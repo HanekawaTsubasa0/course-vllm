@@ -298,3 +298,33 @@ bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
 ```
 
 脚本会 clone 当前仓库、创建新 venv、安装项目、运行非 CUDA 基础 pytest、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。CUDA kernel 编译与接入另用 `python -m course_vllm.benchmarks.grader cuda_smoke` 在 GPU 可见且 nvcc/G++ 兼容的环境验收。
+
+推送远程后，可以用 GitHub fresh clone 验证公开仓库从零可复现：
+
+```bash
+REMOTE_URL=git@github.com:HanekawaTsubasa0/course-vllm.git \
+  bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-github-smoke
+```
+
+## 11. CUDA Toolchain Troubleshooting
+
+CUDA tests 通过 PyTorch extension JIT 编译 `kernels/*.cu`。如果 GPU 可见但 `cuda_smoke` 在编译阶段失败，优先检查 host compiler 是否被当前 `nvcc` 支持。
+
+本次 TA 机器的经验是：CUDA driver capability 为 12.8，系统默认 G++ 15 会触发 nvcc/标准库兼容问题；可用兼容 G++ 解包到本地 `dependence/`，不安装到系统：
+
+```bash
+mkdir -p dependence/debs dependence/gcc14-root
+cd dependence/debs
+apt download g++-14-x86-64-linux-gnu gcc-14-x86-64-linux-gnu cpp-14-x86-64-linux-gnu
+apt download libgcc-14-dev libstdc++-14-dev gcc-14-base
+cd ../..
+for deb in dependence/debs/*.deb; do dpkg-deb -x "$deb" dependence/gcc14-root; done
+```
+
+`course_vllm.kernels.harness` 会自动优先使用：
+
+```text
+dependence/gcc14-root/usr/bin/x86_64-linux-gnu-g++-14
+```
+
+`dependence/` 已写入 `.gitignore`，不会进入 git。不同机器不必照抄该版本号；原则是使用与本机 CUDA toolkit 兼容的 host C++ compiler。

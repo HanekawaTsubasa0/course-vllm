@@ -10,6 +10,12 @@
 - 明确 CANN/AscendC 版本。
 - 确定一个与 CUDA 教学 kernel 对应的算子，例如 vector add、RMSNorm 或 softmax。
 
+## TODO(lab14)
+
+- No required code task in this release.
+- Deliverable-only: 完成 Ascend 架构/CUDA 对照阅读笔记，或补交 Week 10-13 阶段验收。
+- Future scope: 有 Ascend 环境后再新增 Add/RMSNorm/softmax 对照实验。
+
 ## 当前交付
 
 - `/health` 和 `course_vllm.stages` 能说明 week14 deferred。

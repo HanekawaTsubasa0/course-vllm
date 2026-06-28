@@ -16,6 +16,12 @@
 3. 记录首个 baseline：请求数、输出 tokens、平均延迟、最大延迟。
 4. 阅读 `Engine.generate_stream`，标注 prefill 与 decode 分界。
 
+## TODO(lab01)
+
+- Read-only: `course_vllm/engine/engine.py::Engine.generate_stream`，标注 prefill、sample、decode、stop 的位置。
+- Read-only: `course_vllm/server/api.py`，记录 `/health` 和 `/generate` 请求路径。
+- Deliverable-only: 不改核心代码，提交调用链说明和 baseline 指标。
+
 ## 验证
 
 ```bash

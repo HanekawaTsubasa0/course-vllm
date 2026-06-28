@@ -16,6 +16,12 @@
 3. 对比不开 cache 的全序列 forward 和 cache decode 的数据量。
 4. 解释 batch decode 为什么要按历史长度分桶。
 
+## TODO(lab08)
+
+- Edit: `course_vllm/engine/kv_cache.py` 中 cache allocation、append、metadata 维护逻辑。
+- Inspect integration: `course_vllm/model/qwen3_continuous_backend.py` 的 prefill/decode cache 使用。
+- Keep boundary: 不改 tokenizer、sampling 或 HTTP API。
+
 ## 验证
 
 ```bash

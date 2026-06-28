@@ -66,6 +66,13 @@ bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
 
 该脚本会 clone 当前仓库、创建新 venv、安装项目、运行非 CUDA 基础 pytest、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。CUDA kernel 接入仍由 `grader cuda_smoke` 在 GPU 可见且 nvcc/G++ 兼容的环境单独验收。
 
+推送远程后，可用公开仓库 fresh clone 复验：
+
+```bash
+REMOTE_URL=git@github.com:HanekawaTsubasa0/course-vllm.git \
+  bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-github-smoke
+```
+
 ### 0.8 课程工程核心开关
 
 服务和离线脚本都支持：

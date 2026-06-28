@@ -16,6 +16,12 @@
 3. 验证 stop token、EOS、max_tokens 三种终止条件。
 4. 对单请求运行 PyTorch profiler，作为 week10/11 优化前基线。
 
+## TODO(lab09)
+
+- Edit: `course_vllm/engine/request.py` 中 request/sequence 状态字段或状态转换。
+- Edit: `course_vllm/engine/engine.py::generate_stream` 主循环。
+- Keep boundary: 不改模型 forward 数值逻辑；本周关注请求生命周期和流式事件。
+
 ## 验证
 
 ```bash

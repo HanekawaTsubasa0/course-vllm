@@ -15,6 +15,12 @@
 3. 使用 `load_cuda_extension` 编译 kernel。
 4. 记录首次 JIT 编译时间和热启动运行时间的区别。
 
+## TODO(lab03)
+
+- Edit: `kernels/vector_add.cu` 中的 vector add kernel 和 block/thread 配置实验。
+- Read-only: `course_vllm/kernels/harness.py::load_cuda_extension`，理解 JIT 编译流程。
+- Test target: `tests/test_kernels.py::test_vector_add_cuda_kernel_matches_torch`。
+
 ## 验证
 
 ```bash

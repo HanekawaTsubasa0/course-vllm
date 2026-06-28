@@ -15,6 +15,12 @@
 3. 改成 tiled online softmax，记录显存访问和中间矩阵大小变化。
 4. 与 `paged_attention_decode_reference` 比较误差。
 
+## TODO(lab07)
+
+- Edit: `kernels/course_ops.cu` 中 dense attention 或 paged decode attention 教学 kernel。
+- Edit if needed: `course_vllm/model/ops.py` 和 `course_vllm/model/attention.py` 的 `kernel_impl` dispatch。
+- Keep reference: `dense_attention_decode_reference` 和 `paged_attention_decode_reference` 不作为学生改动目标。
+
 ## 验证
 
 ```bash

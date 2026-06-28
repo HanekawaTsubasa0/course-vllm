@@ -12,6 +12,12 @@
 - week13 容量规划报告。
 - week15 paper-to-system 映射。
 
+## TODO(lab16)
+
+- No new feature code required.
+- Assemble: `docs/reports/week16_final_report_template.md`。
+- Include evidence: tests/grader、profiling、benchmark、capacity planning、paper-to-system map。
+
 ## 建议命令
 
 ```bash
