@@ -15,6 +15,7 @@
 2. 打开 `--pinned-memory` 和 `--transfer-stream`，再次压测。
 3. 设置 `--max-queue-size` 和 `--max-prompt-chars`，验证请求准入。
 4. 用 nsys 观察 memcpy、kernel 和同步点。
+5. 如果短 prompt、短 decode、小并发下优化收益不明显，需要解释 workload 原因；可补充长 prompt 或更高并发实验观察优化开关更可能生效的场景。
 
 ## 建议命令
 

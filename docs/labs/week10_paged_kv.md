@@ -1,6 +1,8 @@
 # Week 10 分页 KV Cache
 
-目标：掌握 block manager、block table、slot mapping、prefix cache 和碎片统计。
+目标：掌握 block manager、block table、slot mapping、教学版 prefix cache 和碎片统计。
+
+说明：本实验的 prefix cache 是 teaching approximation，用于观察完整 block 前缀复用和碎片统计；它不包含生产系统里的哈希匹配、引用计数、淘汰策略和跨请求生命周期管理。
 
 ## 代码入口
 

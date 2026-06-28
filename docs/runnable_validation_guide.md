@@ -1,6 +1,6 @@
 # course-vllm 可运行验证与交付指南
 
-本文档记录本仓库当前可复现的正确性、CUDA、profiling、serving benchmark 和课程报告生成流程。命令默认在仓库根目录运行。
+本文档记录 TA 发布前验收流程和本仓库当前可复现的正确性、CUDA、profiling、serving benchmark 和课程报告生成流程。命令默认在仓库根目录运行；本机路径、硬件型号和 profiles 文件名不进入学生 handout。
 
 ## 环境
 
@@ -46,6 +46,7 @@ pytest -q -rs
 单独验证 CUDA kernel 和 attention：
 
 ```bash
+python -m course_vllm.benchmarks.grader cuda_smoke
 pytest -q tests/test_kernels.py tests/test_attention.py -rs
 ```
 
@@ -287,3 +288,13 @@ profiles/reports/week15_cache_aware_demo.json
 ```
 
 这些文件是本次课程验收可直接引用的实测证据。
+
+## 10. Clean-clone Smoke
+
+发布前在新目录从零验证一次，证明课程闭环不依赖当前工作树的历史 profiles、旧 venv 或手工缓存。
+
+```bash
+bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
+```
+
+脚本会 clone 当前仓库、创建新 venv、安装项目、运行 `pytest -q -rs`、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。

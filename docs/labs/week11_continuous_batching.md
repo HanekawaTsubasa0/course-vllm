@@ -2,6 +2,8 @@
 
 目标：实现 prefill/decode 调度、chunked prefill 和 preemption 的可观察教学版本。
 
+说明：本周调度是 teaching approximation。它展示 waiting/running 队列、token budget 分块和基础 preemption；生产系统还需要结合 block allocator、SLO、优先级、公平性、prefix cache 和重算/换出策略。
+
 ## 当前入口
 
 - `Scheduler(enable_chunked_prefill=True)`
@@ -17,7 +19,7 @@ python -m course_vllm.benchmarks.grader week11
 
 ## 说明
 
-当前实现优先保证结构清晰：长 prompt 可以按 token budget 切块推进；`Scheduler.preempt(seq)` 会释放运行态并放回 waiting 队列。工业级系统还会把 preemption 和 block allocator、prefix cache、请求优先级结合起来。
+当前实现优先保证结构清晰：长 prompt 可以按 token budget 切块推进；`Scheduler.preempt(seq)` 会释放运行态并放回 waiting 队列。报告中需要明确区分课程 demo 和 vLLM/SGLang 级生产调度。
 
 HTTP 服务开启：
 

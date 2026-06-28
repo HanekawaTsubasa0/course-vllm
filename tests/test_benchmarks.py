@@ -91,7 +91,10 @@ def test_paper_to_system_map_lists_engine_modules():
 
 
 def test_grader_has_stage_mappings_for_course_tail():
+    assert "cuda_smoke" in STAGE_TESTS
     assert "week11" in STAGE_TESTS
     assert "week12" in STAGE_TESTS
     assert "week13" in STAGE_TESTS
     assert "week15" in STAGE_TESTS
+    assert "tests/test_kernels.py::test_cuda_rms_norm_matches_torch" in STAGE_TESTS["cuda_smoke"]
+    assert "tests/test_attention.py::test_cuda_paged_attention_decode_matches_dense_attention" in STAGE_TESTS["cuda_smoke"]

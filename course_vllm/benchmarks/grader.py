@@ -6,6 +6,15 @@ import sys
 
 
 STAGE_TESTS = {
+    "cuda_smoke": [
+        "tests/test_kernels.py::test_vector_add_cuda_kernel_matches_torch",
+        "tests/test_kernels.py::test_cuda_rms_norm_matches_torch",
+        "tests/test_kernels.py::test_cuda_rope_matches_qwen3_rotate_half",
+        "tests/test_kernels.py::test_cuda_matmul_tiled_matches_torch",
+        "tests/test_kernels.py::test_cuda_softmax_matches_torch",
+        "tests/test_attention.py::test_cuda_dense_attention_decode_matches_reference",
+        "tests/test_attention.py::test_cuda_paged_attention_decode_matches_dense_attention",
+    ],
     "week01": ["tests/test_engine.py", "tests/test_server_batching.py"],
     "week02": ["tests/test_benchmarks.py"],
     "week03": ["tests/test_kernels.py::test_vector_add_cuda_kernel_matches_torch"],
@@ -42,7 +51,11 @@ STAGE_TESTS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run course-vllm stage checks.")
-    parser.add_argument("stage", choices=sorted(STAGE_TESTS))
+    parser.add_argument(
+        "stage",
+        choices=sorted(STAGE_TESTS),
+        help="course week such as week11, or cuda_smoke for forced CUDA kernel checks",
+    )
     parser.add_argument("--pytest-arg", action="append", default=[])
     args = parser.parse_args()
     cmd = [sys.executable, "-m", "pytest", "-q", "-rs", *STAGE_TESTS[args.stage], *args.pytest_arg]

@@ -2,6 +2,8 @@
 
 本节按当前项目决策暂缓。课程工程保留 stage 和交付占位，但本轮不要求实现 AscendC 目录、官方 Add 样例或 CUDA 对照。
 
+课堂时间可用于前沿专题、期中补验收、Ascend 架构讲解或 CUDA/Ascend 编程模型对照；不计硬件实验分，不要求无 Ascend 环境的学生完成 AscendC kernel。
+
 ## 后续补齐条件
 
 - 有可用 Ascend 硬件或 CI。

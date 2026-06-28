@@ -4,16 +4,20 @@
 
 ## 0. 上课前准备
 
-### 0.1 进入工程
+### 0.1 文档边界
+
+本文是教师/助教内部执行手册。学生发布版以 `docs/labs/README.md` 和 `docs/labs/week*.md` 为准；学生版只保留相对路径、通用环境要求、示例输出和交付物，不包含 TA 本机路径、硬件型号、profiles 文件名或一次性实测结论。
+
+### 0.2 进入工程
 
 ```bash
-cd /home/wangqi/llm_serving/course-vllm
+cd course-vllm
 source .venv/bin/activate
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 ```
 
-### 0.2 确认 GPU
+### 0.3 确认 GPU
 
 ```bash
 nvidia-smi
@@ -25,60 +29,44 @@ if torch.cuda.is_available():
 PY
 ```
 
-本次验证环境：
-
-- GPU: 2 x NVIDIA GeForce RTX 4090
-- Driver: 570.86.15
-- CUDA: 12.8
-- PyTorch: 2.8.0+cu128
-- Model: Qwen/Qwen3-0.6B, local HuggingFace cache
-
 注意：某些沙箱默认看不到 GPU。若 `torch.cuda.is_available()` 为 False，但 `nvidia-smi` 在非沙箱终端可见，需要在 GPU 可见环境运行 CUDA 测试和 profiler。
 
-### 0.3 全量健康检查
+### 0.4 全量健康检查
 
 ```bash
 pytest -q -rs
 ```
 
-本次结果：
-
-```text
-88 passed in 4.56s
-```
-
-### 0.4 逐周自动评测
+### 0.5 逐周自动评测
 
 ```bash
-mkdir -p profiles/reports
 for week in week01 week02 week03 week04 week05 week06 week07 week08 week09 week10 week11 week12 week13 week15; do
   echo "=== $week ==="
   python -m course_vllm.benchmarks.grader "$week"
-done | tee profiles/reports/all_stage_grader_summary.txt
+done
 ```
-
-本次结果：
-
-| 周次 | 结果 |
-| --- | --- |
-| week01 | 13 passed |
-| week02 | 7 passed |
-| week03 | 1 passed |
-| week04 | 2 passed |
-| week05 | 3 passed |
-| week06 | 4 passed |
-| week07 | 10 passed |
-| week08 | 3 passed |
-| week09 | 11 passed |
-| week10 | 12 passed |
-| week11 | 12 passed |
-| week12 | 3 passed |
-| week13 | 2 passed |
-| week15 | 2 passed |
 
 第 14 周 AscendC 暂缓，不纳入当前自动评测。
 
-### 0.5 课程工程核心开关
+### 0.6 强制 CUDA 验收
+
+课堂演示可以使用 `--kernel-impl=auto` 展示自动回退行为；阶段验收至少跑一次强制 CUDA smoke，避免 CUDA kernel 未真正接入时被 fallback 掩盖。
+
+```bash
+python -m course_vllm.benchmarks.grader cuda_smoke
+```
+
+### 0.7 Clean-clone smoke test
+
+发布前由 TA 在新目录从零验证一次，证明结果不依赖当前工作树的历史缓存、旧 profiles 或已安装包。
+
+```bash
+bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
+```
+
+该脚本会 clone 当前仓库、创建新 venv、安装项目、运行 `pytest -q -rs`、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。
+
+### 0.8 课程工程核心开关
 
 服务和离线脚本都支持：
 
@@ -209,11 +197,11 @@ OUT=profiles/ncu_kernels bash scripts/profile/ncu_kernel.sh \
   | tee profiles/reports/ncu_kernel_summary.txt
 ```
 
-### 本次实测结果
+### 示例观察点
 
-- nsys benchmark: requests/s=1.430951, output tokens/s=11.447604, p99=1.710348 s。
-- torch profiler 热点：`aten::copy_`, PyTorch elementwise, `matmul_tiled_kernel`, `rms_norm_kernel`, `paged_attention_decode_kernel`。
-- ncu 当前受权限限制：`ERR_NVGPUCTRPERM`，但 CUDA 测试在 ncu 进程中通过。
+- nsys benchmark 至少记录 requests/s、output tokens/s、p50/p90/p99 和 estimated TPOT。
+- torch profiler 至少列出 3 个主要 CUDA 或 PyTorch hotspot。
+- ncu 若遇到 `ERR_NVGPUCTRPERM`，需要在报告中说明权限限制，并用 CUDA smoke 证明 kernel 可以编译和运行。
 
 ### 学生任务
 
@@ -532,7 +520,9 @@ python -m course_vllm.benchmarks.grader week09
 ### 教学目标
 
 - 理解 block manager、block table、slot mapping。
-- 理解 prefix cache 和碎片统计。
+- 理解教学版 prefix cache 和碎片统计。
+
+说明：本周 prefix cache 是 teaching approximation，用来展示完整 block 前缀复用、block table 和 fragmentation 的关系；它不等价于 vLLM/SGLang 生产实现中的哈希前缀匹配、引用计数、淘汰策略和跨请求生命周期管理。
 
 ### 代码入口
 
@@ -550,7 +540,7 @@ python examples/block_usage.py \
   --decode-steps 2
 ```
 
-本次输出摘要：
+示例输出摘要：
 
 - prefill: used=6, free=2, fragmentation_ratio=0.250
 - decode step 1: fragmentation_ratio=0.125
@@ -580,7 +570,9 @@ python -m course_vllm.benchmarks.grader week10
 
 - 理解 waiting/running 队列。
 - 区分 prefill batch 和 decode batch。
-- 支持 chunked prefill、preemption 和 HTTP batching。
+- 支持教学版 chunked prefill、preemption 和 HTTP batching。
+
+说明：本周调度机制是 teaching approximation。chunked prefill 用 token budget 展示长 prompt 分块推进；preemption 展示释放运行态并回到 waiting 队列。生产系统还会结合 block allocator、优先级、SLO、prefix cache、重算/换出策略和公平性。
 
 ### 代码入口
 
@@ -621,12 +613,14 @@ python -m course_vllm.benchmarks.bench_server \
   --json
 ```
 
-本次 baseline：
+示例 baseline 指标字段：
 
-- requests/s=4.038430
-- output tokens/s=32.307436
-- p50=0.231115
-- p99=1.248274
+- requests/s
+- output tokens/s
+- p50/p90/p99
+- estimated TPOT
+
+TA 本机一次实测数值集中记录在本文末尾，学生报告应以自己环境复测结果为准。
 
 ### 学生任务
 
@@ -700,12 +694,14 @@ python -m course_vllm.benchmarks.bench_server \
   --json
 ```
 
-本次 optimized：
+示例 optimized 指标字段：
 
-- requests/s=3.981867
-- output tokens/s=31.854933
-- p50=0.251096
-- p99=1.219466
+- requests/s
+- output tokens/s
+- p50/p90/p99
+- estimated TPOT
+
+TA 本机短 prompt、短 decode、小并发实测中，optimized 的 requests/s 和 p50 没有优于 Week 11 baseline，仅 p99 略好。这里不能写成“优化显著提升”；应要求学生解释短负载下收益不明显的原因，并补充长 prompt 或更高并发实验来观察 pinned memory、transfer stream、chunked prefill 和 admission control 更可能生效的场景。
 
 ### 学生任务
 
@@ -717,6 +713,7 @@ python -m course_vllm.benchmarks.bench_server \
 
 ```bash
 python -m course_vllm.benchmarks.grader week12
+python -m course_vllm.benchmarks.grader cuda_smoke
 ```
 
 ### 交付物
@@ -753,13 +750,13 @@ python -m course_vllm.benchmarks.capacity_planner \
   --report
 ```
 
-本次结果：
+示例容量规划字段：
 
-- KV budget=17.400 GiB
-- KV blocks=10181
-- token slots=162896
-- full-length sequences=79
-- target concurrency=32 不需要多卡扩容。
+- KV budget
+- KV blocks
+- token slots
+- full-length sequences
+- target concurrency 是否需要多卡扩容
 
 ### 学生任务
 
@@ -782,7 +779,7 @@ python -m course_vllm.benchmarks.grader week13
 
 ### 当前状态
 
-本周按课程决策暂缓。工程保留 `week14` stage，但不要求当前仓库实现 AscendC kernel、官方 Add 样例或 CUDA/Ascend 对照。
+本周按课程决策暂缓。工程保留 `week14` stage，但不要求当前仓库实现 AscendC kernel、官方 Add 样例或 CUDA/Ascend 对照。课堂时间可用于前沿专题、期中补验收、Ascend 架构讲解或 CUDA/Ascend 编程模型对照；不计硬件实验分，不要求无 Ascend 环境的学生完成 AscendC kernel。
 
 ### 后续补齐条件
 
@@ -803,6 +800,8 @@ python -m course_vllm.benchmarks.grader week13
 - 复现一个小型机制：cache-aware serving。
 - 理解 prefill/decode disaggregation、TokenDance-style scheduling 等方向如何落到系统。
 
+说明：本周 cache-aware serving 是 teaching approximation，用 shared-prefix score 展示请求重排的潜在价值；它还不是完整在线 scheduler，不包含真实到达时间、SLO、KV block 生命周期、饥饿控制或多租户公平性。
+
 ### 代码入口
 
 - `course_vllm/engine/policies.py`
@@ -817,10 +816,10 @@ python -m course_vllm.benchmarks.cache_aware_demo \
   --prompts "1,2,3,4|1,2,3,9|8,7|1,2,5"
 ```
 
-本次结果：
+示例结果字段：
 
-- baseline shared-prefix score=3
-- cache-aware shared-prefix score=5
+- baseline shared-prefix score
+- cache-aware shared-prefix score
 - mapped modules: `engine/policies.py`, `engine/block_manager.py`, `engine/engine.py`
 
 ### 学生任务
@@ -871,6 +870,7 @@ done
 3. CUDA kernel/attention：
 
 ```bash
+python -m course_vllm.benchmarks.grader cuda_smoke
 pytest -q tests/test_kernels.py tests/test_attention.py -rs
 ```
 
@@ -989,7 +989,45 @@ ERR_NVGPUCTRPERM
 | 报告模板 | `docs/reports/*.md` |
 | 运行验收 | `docs/runnable_validation_guide.md` |
 
-## 19. 本次已生成证据文件
+## 19. TA validation log
+
+以下记录仅用于 TA 内部发布检查，不进入学生 handout。学生文档应使用相对路径和“示例输出”，不要要求学生复现 TA 机器的绝对数值。
+
+### 19.1 本次验证环境
+
+- Workspace: `/home/wangqi/llm_serving/course-vllm`
+- GPU: 2 x NVIDIA GeForce RTX 4090
+- Driver: 570.86.15
+- CUDA driver capability: 12.8
+- PyTorch: 2.8.0+cu128
+- Model: Qwen/Qwen3-0.6B, local HuggingFace cache
+
+### 19.2 本次健康检查摘要
+
+- Full pytest: 88 passed in 4.56s
+- Stage grader: week01/week02/week03/week04/week05/week06/week07/week08/week09/week10/week11/week12/week13/week15 passed
+- CUDA smoke: required before publication; run `python -m course_vllm.benchmarks.grader cuda_smoke` in a GPU-visible environment
+- Clean-clone smoke: required before publication; run `bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke`
+
+### 19.3 本次性能观察
+
+Week 11 baseline short workload:
+
+- requests/s=4.038430
+- output tokens/s=32.307436
+- p50=0.231115
+- p99=1.248274
+
+Week 12 optimized short workload:
+
+- requests/s=3.981867
+- output tokens/s=31.854933
+- p50=0.251096
+- p99=1.219466
+
+结论：短 prompt、短 decode、小并发下，optimized 的吞吐和 p50 没有优于 Week 11 baseline，只有 p99 略好。发布材料应把它作为“优化收益不明显，需要解释 workload 原因”的案例，而不是性能提升证据。
+
+### 19.4 本次证据文件
 
 ```text
 profiles/reports/all_stage_grader_summary.txt
@@ -1007,4 +1045,16 @@ profiles/nsys_server_ready.nsys-rep
 profiles/torch_profiler/*.pt.trace.json
 ```
 
-这些文件可直接用于课程展示、阶段检查和最终报告。
+这些文件可用于 TA 课程展示、阶段检查和最终报告，不作为学生版固定路径要求。
+
+## 20. Review closure
+
+| 评论项 | 当前处理 | 后续要求 |
+| --- | --- | --- |
+| 区分 TA runbook 和学生 handout | 本手册明确为 TA 内部；学生入口为 `docs/labs/README.md` 与逐周 lab | 学生版只保留相对路径、示例输出和交付物 |
+| Week 12 优化数据谨慎表述 | 已改为短负载收益不明显，要求解释原因 | 可补长 prompt/高并发实验作为附加证据 |
+| `auto` kernel 掩盖问题 | 新增 `grader cuda_smoke`，发布前强制执行 | 课堂 demo 可继续使用 `auto` |
+| Week 10/11/15 机制过度承诺 | 已标注 teaching approximation，并说明生产差距 | 报告中必须区分 demo 和生产实现 |
+| Week 14 暂缓出现空洞 | 已加入课堂替代项和不计硬件实验说明 | 有 Ascend 硬件/CI 后再补真实实验 |
+| clean-clone 验收 | 新增 `scripts/validation/clean_clone_smoke.sh` 和 runbook 命令 | 发布前必须保存一次输出记录 |
+| 旧 review 的课程闭环 | 周次、profiler、CUDA、grader、报告模板已经串联 | AscendC 仍为明确 deferred |

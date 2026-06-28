@@ -2,6 +2,8 @@
 
 目标：把工业级推理系统论文机制映射到课程工程，完成一个小型改造或复现实验，并比较指标变化。
 
+说明：cache-aware serving 等机制在本周以 teaching approximation 形式出现。示例 demo 用 shared-prefix score 说明请求重排的潜在价值，不代表完整在线 scheduler；报告需要说明和生产实现的差距。
+
 ## 代码入口
 
 - `course_vllm/engine/policies.py`
