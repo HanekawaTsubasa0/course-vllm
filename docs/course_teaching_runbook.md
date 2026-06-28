@@ -64,7 +64,7 @@ python -m course_vllm.benchmarks.grader cuda_smoke
 bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
 ```
 
-该脚本会 clone 当前仓库、创建新 venv、安装项目、运行 `pytest -q -rs`、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。
+该脚本会 clone 当前仓库、创建新 venv、安装项目、运行非 CUDA 基础 pytest、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。CUDA kernel 接入仍由 `grader cuda_smoke` 在 GPU 可见且 nvcc/G++ 兼容的环境单独验收。
 
 ### 0.8 课程工程核心开关
 
@@ -1008,6 +1008,7 @@ ERR_NVGPUCTRPERM
 - Stage grader: week01/week02/week03/week04/week05/week06/week07/week08/week09/week10/week11/week12/week13/week15 passed
 - CUDA smoke: required before publication; run `python -m course_vllm.benchmarks.grader cuda_smoke` in a GPU-visible environment
 - Clean-clone smoke: required before publication; run `bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke`
+- Strict CUDA smoke: required on a GPU-visible environment with a CUDA-compatible host compiler; run `python -m course_vllm.benchmarks.grader cuda_smoke`
 
 ### 19.3 本次性能观察
 

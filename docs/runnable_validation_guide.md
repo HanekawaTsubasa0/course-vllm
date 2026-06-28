@@ -297,4 +297,4 @@ profiles/reports/week15_cache_aware_demo.json
 bash scripts/validation/clean_clone_smoke.sh /tmp/course-vllm-clean-smoke
 ```
 
-脚本会 clone 当前仓库、创建新 venv、安装项目、运行 `pytest -q -rs`、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。
+脚本会 clone 当前仓库、创建新 venv、安装项目、运行非 CUDA 基础 pytest、`grader week01/week02/week11/week12`，并启动一次 HTTP demo。CUDA kernel 编译与接入另用 `python -m course_vllm.benchmarks.grader cuda_smoke` 在 GPU 可见且 nvcc/G++ 兼容的环境验收。

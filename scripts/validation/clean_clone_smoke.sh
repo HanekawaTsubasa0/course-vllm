@@ -54,7 +54,7 @@ python -m pip install -e ".[dev]"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 
-pytest -q -rs
+pytest -q -rs --ignore=tests/test_kernels.py --ignore=tests/test_attention.py
 python -m course_vllm.benchmarks.grader week01
 python -m course_vllm.benchmarks.grader week02
 python -m course_vllm.benchmarks.grader week11

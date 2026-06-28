@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 
@@ -59,7 +60,10 @@ def main() -> None:
     parser.add_argument("--pytest-arg", action="append", default=[])
     args = parser.parse_args()
     cmd = [sys.executable, "-m", "pytest", "-q", "-rs", *STAGE_TESTS[args.stage], *args.pytest_arg]
-    raise SystemExit(subprocess.call(cmd))
+    env = os.environ.copy()
+    if args.stage == "cuda_smoke":
+        env["COURSE_VLLM_STRICT_CUDA"] = "1"
+    raise SystemExit(subprocess.call(cmd, env=env))
 
 
 if __name__ == "__main__":
