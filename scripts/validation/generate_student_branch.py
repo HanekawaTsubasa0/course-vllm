@@ -275,11 +275,14 @@ def stub_python() -> None:
     for path, replacements in files.items():
         text = read(path)
         for start, end, body in replacements:
-            if end:
-                text = replace_function(text, start, end, body)
-            else:
-                start_index = text.index(start)
-                text = text[:start_index] + body
+            try:
+                if end:
+                    text = replace_function(text, start, end, body)
+                else:
+                    start_index = text.index(start)
+                    text = text[:start_index] + body
+            except ValueError as exc:
+                raise ValueError(f"failed to stub {path}; missing anchor starting with {start[:80]!r}") from exc
         write(path, text)
 
 
