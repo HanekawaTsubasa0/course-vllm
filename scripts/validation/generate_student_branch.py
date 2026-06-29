@@ -15,7 +15,7 @@ def run(cmd: list[str]) -> None:
 def replace_between(text: str, start: str, end: str, replacement: str) -> str:
     start_index = text.index(start)
     end_index = text.index(end, start_index)
-    return text[:start_index] + replacement + text[end_index + len(end) :]
+    return text[:start_index] + replacement + text[end_index:]
 
 
 def replace_function(text: str, start: str, end: str, body: str) -> str:
