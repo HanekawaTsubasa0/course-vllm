@@ -19,44 +19,10 @@ def paged_attention_decode(
     *,
     scale: float | None = None,
 ) -> torch.Tensor:
-    """Decode attention over vLLM-style paged KV slots.
+    """TODO(lab07): dispatch paged decode attention to CUDA or reference."""
+    raise NotImplementedError("TODO(lab07): implement paged_attention_decode")
 
-    CUDA tensors use the course CUDA extension when available. CPU tensors, or
-    environments without a buildable CUDA extension, use the PyTorch reference path.
-    """
 
-    _validate_decode_inputs(
-        query=query,
-        key_cache=key_cache,
-        value_cache=value_cache,
-        block_tables=block_tables,
-        context_lens=context_lens,
-        block_size=block_size,
-    )
-    if query.is_cuda:
-        try:
-            from course_vllm.kernels.cuda_ops import cuda_paged_attention_decode
-
-            return cuda_paged_attention_decode(
-                query=query,
-                key_cache=key_cache,
-                value_cache=value_cache,
-                block_tables=block_tables,
-                context_lens=context_lens,
-                block_size=block_size,
-                scale=scale,
-            )
-        except KernelUnavailable:
-            pass
-    return paged_attention_decode_reference(
-        query=query,
-        key_cache=key_cache,
-        value_cache=value_cache,
-        block_tables=block_tables,
-        context_lens=context_lens,
-        block_size=block_size,
-        scale=scale,
-    )
 
 
 def paged_attention_decode_reference(

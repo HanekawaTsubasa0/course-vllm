@@ -241,13 +241,7 @@ class Qwen3TorchBackend:
         return self._to_device(tensor)
 
     def _to_device(self, tensor: torch.Tensor) -> torch.Tensor:
+        """TODO(lab12): add pinned-memory and transfer-stream optimized CPU->GPU copy."""
         if self.device.type != "cuda":
             return tensor.to(self.device)
-        if self.use_pinned_memory:
-            tensor = tensor.pin_memory()
-        if self.transfer_stream is None:
-            return tensor.to(self.device, non_blocking=self.use_pinned_memory)
-        with torch.cuda.stream(self.transfer_stream):
-            moved = tensor.to(self.device, non_blocking=True)
-        torch.cuda.current_stream(self.device).wait_stream(self.transfer_stream)
-        return moved
+        return tensor.to(self.device)

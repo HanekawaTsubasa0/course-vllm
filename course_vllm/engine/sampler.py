@@ -54,11 +54,5 @@ class Sampler:
         return int(selected.item())
 
     def _softmax(self, logits: torch.Tensor) -> torch.Tensor:
-        if logits.is_cuda:
-            try:
-                from course_vllm.kernels.cuda_ops import cuda_softmax
-
-                return cuda_softmax(logits.reshape(1, -1)).reshape(-1)
-            except KernelUnavailable:
-                pass
-        return torch.softmax(logits.cpu(), dim=-1)
+        """TODO(lab06): implement stable softmax and optionally dispatch CUDA softmax."""
+        raise NotImplementedError("TODO(lab06): implement Sampler._softmax")

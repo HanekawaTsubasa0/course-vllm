@@ -34,19 +34,10 @@ class CourseLinear(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.kernel_impl in {"auto", "cuda"} and x.is_cuda:
-            try:
-                from course_vllm.kernels.cuda_ops import cuda_matmul_tiled
+        """TODO(lab05): dispatch to the teaching matmul kernel and keep torch fallback."""
+        raise NotImplementedError("TODO(lab05): implement CourseLinear.forward")
 
-                flat = x.reshape(-1, x.shape[-1])
-                out = cuda_matmul_tiled(flat, self.weight.t().contiguous())
-                if self.bias is not None:
-                    out = out + self.bias.to(device=out.device, dtype=out.dtype)
-                return out.reshape(*x.shape[:-1], self.out_features)
-            except KernelUnavailable:
-                if self.kernel_impl == "cuda":
-                    raise
-        return F.linear(x, self.weight, self.bias)
+
 
 
 def dense_attention_prefill_reference(
@@ -97,15 +88,10 @@ def dense_attention_prefill(
     kernel_impl: str = "torch",
     block_size: int | None = None,
 ) -> torch.Tensor:
-    if kernel_impl in {"auto", "cuda"} and query.is_cuda:
-        try:
-            from course_vllm.kernels.cuda_ops import cuda_dense_attention_prefill
+    """TODO(lab07): implement causal prefill attention dispatch."""
+    raise NotImplementedError("TODO(lab07): implement dense_attention_prefill")
 
-            return cuda_dense_attention_prefill(query, key, value, scale=scale)
-        except KernelUnavailable:
-            if kernel_impl == "cuda":
-                raise
-    return dense_attention_prefill_reference(query, key, value, scale=scale, block_size=block_size)
+
 
 
 def dense_attention_decode_reference(

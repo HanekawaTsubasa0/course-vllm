@@ -24,15 +24,8 @@ class ContinuousKVCache:
         self._cache: dict[tuple[int, int], LayerKV] = {}
 
     def append(self, seq_id: int, layer_id: int, key: torch.Tensor, value: torch.Tensor) -> None:
-        cache_key = (seq_id, layer_id)
-        if cache_key not in self._cache:
-            self._cache[cache_key] = LayerKV(key=key.clone(), value=value.clone())
-            return
-        layer = self._cache[cache_key]
-        self._cache[cache_key] = LayerKV(
-            key=torch.cat([layer.key, key], dim=-2),
-            value=torch.cat([layer.value, value], dim=-2),
-        )
+        """TODO(lab08): append K/V tensors on the sequence dimension."""
+        raise NotImplementedError("TODO(lab08): implement ContinuousKVCache.append")
 
     def get(self, seq_id: int, layer_id: int) -> LayerKV:
         return self._cache[(seq_id, layer_id)]
@@ -45,8 +38,8 @@ class ContinuousKVCache:
         return (seq_id, layer_id) in self._cache
 
     def release(self, seq_id: int) -> None:
-        for key in [key for key in self._cache if key[0] == seq_id]:
-            del self._cache[key]
+        """TODO(lab08): release all cached layers for one sequence."""
+        raise NotImplementedError("TODO(lab08): implement ContinuousKVCache.release")
 
     def num_layers_for(self, seq_id: int) -> int:
         return sum(1 for item in self._cache if item[0] == seq_id)

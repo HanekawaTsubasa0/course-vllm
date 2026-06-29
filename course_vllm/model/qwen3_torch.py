@@ -62,20 +62,10 @@ class Qwen3RMSNorm(nn.Module):
         self.kernel_impl = kernel_impl
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.kernel_impl in {"auto", "cuda"} and x.is_cuda:
-            try:
-                from course_vllm.kernels.cuda_ops import cuda_rms_norm
+        """TODO(lab04): implement RMSNorm and optional CUDA dispatch."""
+        raise NotImplementedError("TODO(lab04): implement Qwen3RMSNorm.forward")
 
-                flat = x.reshape(-1, x.shape[-1])
-                return cuda_rms_norm(flat, self.weight, eps=self.eps).reshape_as(x)
-            except KernelUnavailable:
-                if self.kernel_impl == "cuda":
-                    raise
-        dtype = x.dtype
-        x = x.float()
-        variance = x.pow(2).mean(dim=-1, keepdim=True)
-        x = x * torch.rsqrt(variance + self.eps)
-        return self.weight * x.to(dtype)
+
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -92,19 +82,10 @@ def apply_rotary_pos_emb(
     *,
     kernel_impl: str = "torch",
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if kernel_impl in {"auto", "cuda"} and q.is_cuda:
-        try:
-            q_out = _cuda_rope_nd(q, cos, sin)
-            k_out = _cuda_rope_nd(k, cos, sin)
-            return q_out, k_out
-        except KernelUnavailable:
-            if kernel_impl == "cuda":
-                raise
-    cos = cos.unsqueeze(1)
-    sin = sin.unsqueeze(1)
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
+    """TODO(lab04): apply RoPE to Q and K, with optional CUDA dispatch."""
+    raise NotImplementedError("TODO(lab04): implement apply_rotary_pos_emb")
+
+
 
 
 def _cuda_rope_nd(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor | None = None) -> torch.Tensor:

@@ -2,7 +2,8 @@
 
 __global__ void vector_add_kernel(const float* a, const float* b, float* out, int n) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < n) out[idx] = a[idx] + b[idx];
+  // TODO(lab03): write out[idx] = a[idx] + b[idx] when idx is in range.
+  if (idx < n) out[idx] = 0.0f;
 }
 
 torch::Tensor vector_add(torch::Tensor a, torch::Tensor b) {

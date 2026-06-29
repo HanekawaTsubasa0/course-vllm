@@ -69,22 +69,8 @@ class BlockManager:
         return table
 
     def ensure_capacity(self, seq_id: int, new_length: int) -> BlockTable:
-        table = self.tables[seq_id]
-        required = table.required_blocks(new_length)
-        missing = required - len(table.block_ids)
-        if missing <= 0:
-            table.length = max(table.length, new_length)
-            return table
-        if missing > self.num_free_blocks:
-            raise RuntimeError(
-                f"not enough KV blocks: need {missing}, free {self.num_free_blocks}"
-            )
-        for _ in range(missing):
-            block_id = self._allocate_fresh_block()
-            table.block_ids.append(block_id)
-            table.owned_block_ids.add(block_id)
-        table.length = max(table.length, new_length)
-        return table
+        """TODO(lab10): allocate enough physical blocks for new_length tokens."""
+        raise NotImplementedError("TODO(lab10): implement BlockManager.ensure_capacity")
 
     def append_tokens(self, seq_id: int, num_new_tokens: int) -> BlockTable:
         table = self.tables[seq_id]
@@ -94,15 +80,8 @@ class BlockManager:
         return list(self.tables[seq_id].block_ids)
 
     def slot_mapping(self, seq_id: int, positions: list[int]) -> list[int]:
-        table = self.tables[seq_id]
-        slots: list[int] = []
-        for position in positions:
-            if position < 0 or position >= table.length:
-                raise IndexError(f"position {position} outside sequence length {table.length}")
-            block_index = position // self.block_size
-            block_offset = position % self.block_size
-            slots.append(table.block_ids[block_index] * self.block_size + block_offset)
-        return slots
+        """TODO(lab10): map logical token positions to physical KV slots."""
+        raise NotImplementedError("TODO(lab10): implement BlockManager.slot_mapping")
 
     def release(self, seq_id: int) -> None:
         table = self.tables.pop(seq_id)
@@ -133,29 +112,8 @@ class BlockManager:
         }
 
     def _allocate_with_prefix_cache(self, table: BlockTable, token_ids: list[int]) -> None:
-        prefix_hash = -1
-        for start in range(0, len(token_ids), self.block_size):
-            block_tokens = tuple(token_ids[start : start + self.block_size])
-            if len(block_tokens) == self.block_size:
-                token_hash = self._block_hash(block_tokens, prefix_hash)
-                cached_block_id = self.hash_to_block_id.get(token_hash)
-                if cached_block_id is not None and self.blocks[cached_block_id].token_ids == block_tokens:
-                    self._claim_cached_block(cached_block_id)
-                    table.block_ids.append(cached_block_id)
-                    prefix_hash = token_hash
-                    continue
-                block_id = self._allocate_fresh_block()
-                block = self.blocks[block_id]
-                block.token_hash = token_hash
-                block.token_ids = block_tokens
-                self.hash_to_block_id[token_hash] = block_id
-                table.block_ids.append(block_id)
-                table.owned_block_ids.add(block_id)
-                prefix_hash = token_hash
-            else:
-                block_id = self._allocate_fresh_block()
-                table.block_ids.append(block_id)
-                table.owned_block_ids.add(block_id)
+        """TODO(lab10): reuse full prefix blocks via hash and reference counts."""
+        raise NotImplementedError("TODO(lab10): implement prefix-cache block allocation")
 
     def _allocate_fresh_block(self) -> int:
         if not self.free_block_ids:

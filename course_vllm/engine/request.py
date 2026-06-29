@@ -48,7 +48,8 @@ class Sequence:
         return self.prompt_token_ids + self.generated_token_ids
 
     def append_token(self, token_id: int) -> None:
-        self.generated_token_ids.append(int(token_id))
+        """TODO(lab09): append one generated token to the sequence state."""
+        raise NotImplementedError("TODO(lab09): implement Sequence.append_token")
 
     def scheduled_prompt_tokens(self) -> list[int]:
         return self.prompt_token_ids[self.scheduled_start : self.scheduled_end]
@@ -61,5 +62,5 @@ class Sequence:
         return max_tokens is not None and len(self.generated_token_ids) >= max_tokens
 
     def finish(self) -> None:
-        self.status = RequestStatus.FINISHED
-        self.request.status = RequestStatus.FINISHED
+        """TODO(lab09): mark both sequence and request as finished."""
+        raise NotImplementedError("TODO(lab09): implement Sequence.finish")

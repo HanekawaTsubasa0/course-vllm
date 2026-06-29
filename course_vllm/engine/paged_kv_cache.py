@@ -58,14 +58,8 @@ class PagedKVCache:
         self.write(seq_id=seq_id, layer_id=layer_id, positions=positions, key=key, value=value)
 
     def reserve(self, seq_id: int, num_new_tokens: int) -> list[int]:
-        if num_new_tokens < 0:
-            raise ValueError("num_new_tokens must be >= 0")
-        table = self.block_manager.tables[seq_id]
-        old_length = table.length
-        new_length = old_length + num_new_tokens
-        self.block_manager.ensure_capacity(seq_id, new_length)
-        table.length = new_length
-        return list(range(old_length, new_length))
+        """TODO(lab10): reserve logical positions and grow the block table."""
+        raise NotImplementedError("TODO(lab10): implement PagedKVCache.reserve")
 
     def write(
         self,
@@ -77,24 +71,8 @@ class PagedKVCache:
         *,
         skip_shared: bool = False,
     ) -> None:
-        self._validate_layer_id(layer_id)
-        self._validate_kv(key, value)
-        if key.shape[-2] != len(positions):
-            raise ValueError("number of positions must match KV sequence length")
-        key_tokens = key.squeeze(0).transpose(0, 1).contiguous()
-        value_tokens = value.squeeze(0).transpose(0, 1).contiguous()
-        if skip_shared:
-            positions, key_tokens, value_tokens = self._owned_write_view(
-                seq_id,
-                positions,
-                key_tokens,
-                value_tokens,
-            )
-            if not positions:
-                return
-        slots = self.block_manager.slot_mapping(seq_id, positions)
-        self.key_cache[layer_id, slots] = key_tokens
-        self.value_cache[layer_id, slots] = value_tokens
+        """TODO(lab10): write per-token K/V into physical slots."""
+        raise NotImplementedError("TODO(lab10): implement PagedKVCache.write")
 
     def get_dense(self, seq_id: int, layer_id: int) -> tuple[torch.Tensor, torch.Tensor]:
         self._validate_layer_id(layer_id)

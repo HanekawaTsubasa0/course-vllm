@@ -40,9 +40,8 @@ class Scheduler:
         self.running: list[Sequence] = []
 
     def add(self, seq: Sequence) -> None:
-        seq.status = RequestStatus.WAITING
-        seq.request.status = RequestStatus.WAITING
-        self.waiting.append(seq)
+        """TODO(lab11): put a new sequence into the waiting queue."""
+        raise NotImplementedError("TODO(lab11): implement Scheduler.add")
 
     def schedule(self) -> ScheduledBatch | None:
         prefill = self._schedule_prefill()
@@ -51,44 +50,12 @@ class Scheduler:
         return self._schedule_decode()
 
     def _schedule_prefill(self) -> ScheduledBatch | None:
-        selected: list[Sequence] = []
-        token_budget = 0
-        while self.waiting and len(selected) < self.max_num_seqs:
-            seq = self.waiting[0]
-            remaining = len(seq.prompt_token_ids) - seq.prefill_offset
-            if remaining <= 0:
-                self.waiting.popleft()
-                seq.status = RequestStatus.RUNNING
-                seq.request.status = RequestStatus.RUNNING
-                self.running.append(seq)
-                continue
-            available = self.max_num_batched_tokens - token_budget
-            if available <= 0:
-                break
-            if remaining > available and (selected or not self.enable_chunked_prefill):
-                break
-            scheduled_tokens = min(remaining, available) if self.enable_chunked_prefill else remaining
-            seq.scheduled_start = seq.prefill_offset
-            seq.scheduled_end = seq.prefill_offset + scheduled_tokens
-            self.waiting.popleft()
-            if seq.scheduled_end < len(seq.prompt_token_ids):
-                self.waiting.appendleft(seq)
-            else:
-                seq.status = RequestStatus.RUNNING
-                seq.request.status = RequestStatus.RUNNING
-                self.running.append(seq)
-            selected.append(seq)
-            token_budget += scheduled_tokens
-        if not selected:
-            return None
-        return ScheduledBatch(kind=BatchKind.PREFILL, sequences=selected, num_tokens=token_budget)
+        """TODO(lab11): build a prefill batch under sequence/token budgets."""
+        raise NotImplementedError("TODO(lab11): implement Scheduler._schedule_prefill")
 
     def _schedule_decode(self) -> ScheduledBatch | None:
-        active = [seq for seq in self.running if seq.status == RequestStatus.RUNNING]
-        if not active:
-            return None
-        selected = active[: self.max_num_seqs]
-        return ScheduledBatch(kind=BatchKind.DECODE, sequences=selected, num_tokens=len(selected))
+        """TODO(lab11): select running sequences for one-token decode."""
+        raise NotImplementedError("TODO(lab11): implement Scheduler._schedule_decode")
 
     def finish(self, seq: Sequence) -> None:
         seq.finish()

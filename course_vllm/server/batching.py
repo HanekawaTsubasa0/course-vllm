@@ -201,14 +201,8 @@ class BatchingEngine:
         return stats
 
     def _admit(self, prompt: str) -> None:
-        if self.max_prompt_chars is not None and len(prompt) > self.max_prompt_chars:
-            raise ValueError(
-                f"prompt too long: {len(prompt)} chars exceeds max_prompt_chars={self.max_prompt_chars}"
-            )
-        if self.max_queue_size is not None:
-            depth = self._queue.qsize() + len(self._pending)
-            if depth >= self.max_queue_size:
-                raise RuntimeError(f"request queue is full: depth={depth}, max_queue_size={self.max_queue_size}")
+        """TODO(lab12): enforce prompt length and queue depth admission limits."""
+        raise NotImplementedError("TODO(lab12): implement BatchingEngine._admit")
 
     async def _run_model(self, fn: Callable, *args, **kwargs):
         result_queue: queue.Queue = queue.Queue(maxsize=1)

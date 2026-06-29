@@ -40,111 +40,45 @@ __device__ __nv_bfloat16 from_float<__nv_bfloat16>(float value) {
 
 template <typename scalar_t>
 __global__ void softmax_kernel(const scalar_t* x, scalar_t* out, int rows, int cols) {
+  // TODO(lab06): implement row-wise numerically stable softmax.
   int row = blockIdx.x;
-  if (row >= rows) return;
-  const scalar_t* row_x = x + row * cols;
-  float row_max = -INFINITY;
   for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    row_max = fmaxf(row_max, to_float(row_x[col]));
-  }
-  __shared__ float shared[kThreads];
-  shared[threadIdx.x] = row_max;
-  __syncthreads();
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-    if (threadIdx.x < stride) shared[threadIdx.x] = fmaxf(shared[threadIdx.x], shared[threadIdx.x + stride]);
-    __syncthreads();
-  }
-  row_max = shared[0];
-
-  float denom = 0.0f;
-  for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    denom += expf(to_float(row_x[col]) - row_max);
-  }
-  shared[threadIdx.x] = denom;
-  __syncthreads();
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-    if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
-    __syncthreads();
-  }
-  denom = shared[0];
-  for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    out[row * cols + col] = from_float<scalar_t>(expf(to_float(row_x[col]) - row_max) / denom);
+    out[row * cols + col] = from_float<scalar_t>(0.0f);
   }
 }
 
 template <typename scalar_t>
 __global__ void rms_norm_kernel(const scalar_t* x, const scalar_t* weight, scalar_t* out, int rows, int cols, float eps) {
+  // TODO(lab04): compute RMSNorm over each row.
   int row = blockIdx.x;
-  if (row >= rows) return;
-  const scalar_t* row_x = x + row * cols;
-  float sum_sq = 0.0f;
   for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    float value = to_float(row_x[col]);
-    sum_sq += value * value;
-  }
-  __shared__ float shared[kThreads];
-  shared[threadIdx.x] = sum_sq;
-  __syncthreads();
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-    if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
-    __syncthreads();
-  }
-  float scale = rsqrtf(shared[0] / cols + eps);
-  for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    out[row * cols + col] = from_float<scalar_t>(to_float(row_x[col]) * scale * to_float(weight[col]));
+    out[row * cols + col] = x[row * cols + col];
   }
 }
 
 template <typename scalar_t>
 __global__ void rope_kernel(const scalar_t* x, const scalar_t* cos, const scalar_t* sin, scalar_t* out, int rows, int cols) {
+  // TODO(lab04): implement rotate-half RoPE.
   int row = blockIdx.x;
-  int half = cols / 2;
   for (int col = threadIdx.x; col < cols; col += blockDim.x) {
-    int rotated_col = col < half ? col + half : col - half;
-    float sign = col < half ? -1.0f : 1.0f;
-    int idx = row * cols + col;
-    out[idx] = from_float<scalar_t>(to_float(x[idx]) * to_float(cos[idx]) + sign * to_float(x[row * cols + rotated_col]) * to_float(sin[idx]));
+    out[row * cols + col] = x[row * cols + col];
   }
 }
 
 template <typename scalar_t>
 __global__ void matmul_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, int m, int n, int k) {
+  // TODO(lab05): implement naive C = A @ B.
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
-  if (row >= m || col >= n) return;
-  float acc = 0.0f;
-  for (int kk = 0; kk < k; ++kk) {
-    acc += to_float(a[row * k + kk]) * to_float(b[kk * n + col]);
-  }
-  out[row * n + col] = from_float<scalar_t>(acc);
+  if (row < m && col < n) out[row * n + col] = from_float<scalar_t>(0.0f);
 }
 
 template <typename scalar_t, int Tile>
 __global__ void matmul_tiled_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, int m, int n, int k) {
-  __shared__ float tile_a[Tile][Tile];
-  __shared__ float tile_b[Tile][Tile];
-
+  // TODO(lab05): implement tiled matmul using shared memory.
   int row = blockIdx.y * Tile + threadIdx.y;
   int col = blockIdx.x * Tile + threadIdx.x;
-  float acc = 0.0f;
-
-  for (int start = 0; start < k; start += Tile) {
-    int a_col = start + threadIdx.x;
-    int b_row = start + threadIdx.y;
-    tile_a[threadIdx.y][threadIdx.x] = (row < m && a_col < k) ? to_float(a[row * k + a_col]) : 0.0f;
-    tile_b[threadIdx.y][threadIdx.x] = (b_row < k && col < n) ? to_float(b[b_row * n + col]) : 0.0f;
-    __syncthreads();
-
-    #pragma unroll
-    for (int offset = 0; offset < Tile; ++offset) {
-      acc += tile_a[threadIdx.y][offset] * tile_b[offset][threadIdx.x];
-    }
-    __syncthreads();
-  }
-
-  if (row < m && col < n) {
-    out[row * n + col] = from_float<scalar_t>(acc);
-  }
+  if (row < m && col < n) out[row * n + col] = from_float<scalar_t>(0.0f);
 }
 
 template <typename scalar_t>
@@ -162,47 +96,12 @@ __global__ void paged_attention_decode_kernel(
     int max_blocks,
     int block_size,
     float scale) {
+  // TODO(lab07): implement paged decode attention over block tables.
   int batch = blockIdx.x;
   int head = blockIdx.y;
   int dim = threadIdx.x;
-  if (batch >= batch_size || head >= num_heads) return;
-
-  int group_size = num_heads / num_kv_heads;
-  int kv_head = head / group_size;
-  int context_len = static_cast<int>(context_lens[batch]);
-  const scalar_t* q = query + (batch * num_heads + head) * head_dim;
-  __shared__ float shared[kThreads];
-
-  float max_score = -INFINITY;
-  float denom = 0.0f;
-  float acc = 0.0f;
-  for (int token = 0; token < context_len; ++token) {
-    int block_id = static_cast<int>(block_tables[batch * max_blocks + token / block_size]);
-    int slot = block_id * block_size + token % block_size;
-    const scalar_t* key = key_cache + (slot * num_kv_heads + kv_head) * head_dim;
-    const scalar_t* value = value_cache + (slot * num_kv_heads + kv_head) * head_dim;
-
-    float partial = dim < head_dim ? to_float(q[dim]) * to_float(key[dim]) : 0.0f;
-    shared[threadIdx.x] = partial;
-    __syncthreads();
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-      if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
-      __syncthreads();
-    }
-
-    float score = shared[0] * scale;
-    float next_max = fmaxf(max_score, score);
-    float old_scale = expf(max_score - next_max);
-    float prob = expf(score - next_max);
-    if (dim < head_dim) {
-      acc = acc * old_scale + prob * to_float(value[dim]);
-    }
-    denom = denom * old_scale + prob;
-    max_score = next_max;
-    __syncthreads();
-  }
-  if (dim < head_dim) {
-    out[(batch * num_heads + head) * head_dim + dim] = from_float<scalar_t>(acc / denom);
+  if (batch < batch_size && head < num_heads && dim < head_dim) {
+    out[(batch * num_heads + head) * head_dim + dim] = from_float<scalar_t>(0.0f);
   }
 }
 
@@ -217,41 +116,13 @@ __global__ void dense_attention_prefill_kernel(
     int seq_len,
     int head_dim,
     float scale) {
+  // TODO(lab07): implement causal prefill attention.
   int batch = blockIdx.x;
   int head = blockIdx.y;
   int query_pos = blockIdx.z;
   int dim = threadIdx.x;
-  if (batch >= batch_size || head >= num_heads || query_pos >= seq_len) return;
-
-  const scalar_t* q = query + ((batch * num_heads + head) * seq_len + query_pos) * head_dim;
-  __shared__ float shared[kThreads];
-  float max_score = -INFINITY;
-  float denom = 0.0f;
-  float acc = 0.0f;
-  for (int token = 0; token <= query_pos; ++token) {
-    const scalar_t* k = key + ((batch * num_heads + head) * seq_len + token) * head_dim;
-    const scalar_t* v = value + ((batch * num_heads + head) * seq_len + token) * head_dim;
-    float partial = dim < head_dim ? to_float(q[dim]) * to_float(k[dim]) : 0.0f;
-    shared[threadIdx.x] = partial;
-    __syncthreads();
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-      if (threadIdx.x < stride) shared[threadIdx.x] += shared[threadIdx.x + stride];
-      __syncthreads();
-    }
-
-    float score = shared[0] * scale;
-    float next_max = fmaxf(max_score, score);
-    float old_scale = expf(max_score - next_max);
-    float prob = expf(score - next_max);
-    if (dim < head_dim) {
-      acc = acc * old_scale + prob * to_float(v[dim]);
-    }
-    denom = denom * old_scale + prob;
-    max_score = next_max;
-    __syncthreads();
-  }
-  if (dim < head_dim) {
-    out[((batch * num_heads + head) * seq_len + query_pos) * head_dim + dim] = from_float<scalar_t>(acc / denom);
+  if (batch < batch_size && head < num_heads && query_pos < seq_len && dim < head_dim) {
+    out[((batch * num_heads + head) * seq_len + query_pos) * head_dim + dim] = from_float<scalar_t>(0.0f);
   }
 }
 

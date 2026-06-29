@@ -40,6 +40,18 @@
 - `docs/course_teaching_runbook.md`：教师/助教逐周上课运行手册。
 - `docs/runnable_validation_guide.md`：正确性、profiling、benchmark、报告产物的可复现验收指南。
 
+
+## Student Starter Notes
+
+This branch is the student starter version. Core lab code intentionally contains `TODO(labXX)` stubs. Use `--backend reference` for a runnable oracle while implementing course modules, and run the week-specific grader as each lab is completed.
+
+```bash
+python -m course_vllm.server.api --backend reference --stage week01 --port 18080
+python -m course_vllm.benchmarks.grader week03
+```
+
+The full solution remains on `main`.
+
 ## 环境配置
 
 进入项目并创建虚拟环境：
