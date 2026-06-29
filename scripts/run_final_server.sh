@@ -28,6 +28,28 @@ echo "kernel_impl: $KERNEL_IMPL"
 echo "url: http://$HOST:$PORT"
 echo
 
+if [[ "$KERNEL_IMPL" != "cuda" ]]; then
+  echo "ERROR: final server script requires KERNEL_IMPL=cuda for strict CUDA execution." >&2
+  echo "Set KERNEL_IMPL=cuda or edit the script only for non-final demos." >&2
+  exit 1
+fi
+
+"$PYTHON" - <<'PY'
+import torch
+
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA is not available; final server requires CUDA.")
+print("cuda_available: True")
+print(f"cuda_device_count: {torch.cuda.device_count()}")
+print(f"cuda_device_0: {torch.cuda.get_device_name(0)}")
+print(f"torch: {torch.__version__}")
+print(f"torch_cuda: {torch.version.cuda}")
+PY
+
+export COURSE_VLLM_STRICT_CUDA=1
+echo "strict_cuda: COURSE_VLLM_STRICT_CUDA=1"
+echo
+
 exec "$PYTHON" -m course_vllm.server.api \
   --model "$MODEL" \
   --backend course \

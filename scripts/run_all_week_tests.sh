@@ -33,6 +33,26 @@ echo "root: $ROOT"
 echo "python: $PYTHON"
 echo
 
+if ! "$PYTHON" - <<'PY'
+import torch
+
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA is not available; strict all-week validation requires CUDA.")
+print("cuda_available: True")
+print(f"cuda_device_count: {torch.cuda.device_count()}")
+print(f"cuda_device_0: {torch.cuda.get_device_name(0)}")
+print(f"torch: {torch.__version__}")
+print(f"torch_cuda: {torch.version.cuda}")
+PY
+then
+  echo "ERROR: CUDA preflight failed. Run this script in a GPU-visible environment." >&2
+  exit 1
+fi
+
+export COURSE_VLLM_STRICT_CUDA=1
+echo "strict_cuda: COURSE_VLLM_STRICT_CUDA=1"
+echo
+
 PASS=()
 FAIL=()
 
