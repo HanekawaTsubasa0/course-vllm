@@ -16,8 +16,8 @@ STAGE_TESTS = {
         "tests/test_attention.py::test_cuda_dense_attention_decode_matches_reference",
         "tests/test_attention.py::test_cuda_paged_attention_decode_matches_dense_attention",
     ],
-    "week01": ["tests/test_engine.py", "tests/test_server_batching.py"],
-    "week02": ["tests/test_benchmarks.py"],
+    "week01": ["tests/test_protocol.py", "tests/test_server_api.py::test_create_app_health_reports_stage_and_kernel_impl"],
+    "week02": ["tests/test_benchmarks.py::test_bench_server_summarize_reports_serving_metrics"],
     "week03": ["tests/test_kernels.py::test_vector_add_cuda_kernel_matches_torch"],
     "week04": ["tests/test_kernels.py::test_cuda_rms_norm_matches_torch", "tests/test_kernels.py::test_cuda_rope_matches_qwen3_rotate_half"],
     "week05": [
