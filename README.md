@@ -37,6 +37,8 @@
 
 完整课程使用文档：
 
+- `docs/project_usage_guide.md`：项目怎么安装、运行、验证、压测、生成学生分支。
+- `docs/code_walkthrough.md`：按模块讲清楚所有核心代码、调用链和设计取舍。
 - `docs/course_teaching_runbook.md`：教师/助教逐周上课运行手册。
 - `docs/runnable_validation_guide.md`：正确性、profiling、benchmark、报告产物的可复现验收指南。
 
