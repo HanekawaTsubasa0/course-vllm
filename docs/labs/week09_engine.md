@@ -26,7 +26,7 @@
 
 ```bash
 python -m pytest -q tests/test_engine.py tests/test_chat_client.py
-python scripts/profile/torch_profiler.py --backend paged --max-tokens 8
+python scripts/profile/torch_profiler.py --backend course --kv-mode paged --workload decode --max-tokens 8
 python -m course_vllm.benchmarks.grader week09
 ```
 

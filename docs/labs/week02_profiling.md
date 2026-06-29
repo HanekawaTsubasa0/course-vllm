@@ -19,7 +19,7 @@
 ## 建议命令
 
 ```bash
-python -m course_vllm.server.api --backend hf --stage week02 --port 18080
+python -m course_vllm.server.api --backend reference --stage week02 --port 18080
 python -m course_vllm.benchmarks.bench_server --url http://127.0.0.1:18080/generate --num-requests 16 --concurrency 4 --max-tokens 16 --json
 ```
 
@@ -27,7 +27,9 @@ python -m course_vllm.benchmarks.bench_server --url http://127.0.0.1:18080/gener
 
 ```bash
 bash scripts/profile/nsys_server.sh
-bash scripts/profile/ncu_kernel.sh
+KERNEL_SCENARIO=paged_attention bash scripts/profile/ncu_kernel.sh
+KERNEL_SCENARIO=matmul KERNEL_NAME=matmul bash scripts/profile/ncu_kernel.sh
+python scripts/profile/torch_profiler.py --backend course --kv-mode paged --workload mixed --warmup 1 --repeat 3
 ```
 
 ## 交付物

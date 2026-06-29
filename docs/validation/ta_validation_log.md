@@ -4,7 +4,8 @@
 
 ## 系统概览
 
-- backend: paged
+- backend: course
+- kv_mode: paged
 - model: Qwen/Qwen3-0.6B
 - dtype: bfloat16 for serving, float32 for strict HF alignment
 - kernel_impl: auto
@@ -42,7 +43,8 @@ for mode in forward decode batch-prefill batch-decode; do
   echo "=== $mode ==="
   python validation/compare_qwen3.py "$mode" \
     --model Qwen/Qwen3-0.6B \
-    --backend paged \
+    --backend course \
+  --kv-mode paged \
     --dtype float32
 done | tee profiles/reports/qwen3_alignment_float32.txt
 ```
@@ -83,7 +85,7 @@ Nsight Compute:
 
 | 阶段 | 改动 | requests/s | tokens/s | p50 | p90 | p99 | 结论 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| baseline | paged backend, week11 | 4.038430 | 32.307436 | 0.231115 | 1.245282 | 1.248274 | 可运行 baseline |
+| baseline | course + paged KV, week11 | 4.038430 | 32.307436 | 0.231115 | 1.245282 | 1.248274 | 可运行 baseline |
 | system optimization | pinned memory, transfer stream, chunked prefill, cache-aware scheduling | 3.981867 | 31.854933 | 0.251096 | 1.216504 | 1.219466 | 短负载收益不明显，p99 略好 |
 
 ## 容量规划

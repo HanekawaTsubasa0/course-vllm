@@ -64,7 +64,8 @@ for mode in forward decode batch-prefill batch-decode; do
   echo "=== $mode ==="
   python validation/compare_qwen3.py "$mode" \
     --model Qwen/Qwen3-0.6B \
-    --backend paged \
+    --backend course \
+    --kv-mode paged \
     --dtype float32
 done | tee profiles/reports/qwen3_alignment_float32.txt
 ```
@@ -90,7 +91,8 @@ done | tee profiles/reports/qwen3_alignment_float32.txt
 ```bash
 python scripts/profile/torch_profiler.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --max-tokens 8 \
   --out profiles/torch_profiler \
   | tee profiles/reports/torch_profiler_summary.txt
@@ -168,7 +170,8 @@ Baseline:
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -195,7 +198,8 @@ Optimized:
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week12 \
   --kernel-impl auto \
   --dtype bfloat16 \

@@ -24,7 +24,8 @@ def create_app(
     *,
     dtype: str = "bfloat16",
     device: str | None = None,
-    backend: str = "hf",
+    backend: str = "course",
+    kv_mode: str = "paged",
     stage: str | int | None = None,
     kernel_impl: str = "torch",
     use_pinned_memory: bool = False,
@@ -42,6 +43,7 @@ def create_app(
         dtype=dtype,
         device=device,
         backend=backend,
+        kv_mode=kv_mode,
         stage=stage,
         kernel_impl=kernel_impl,
         use_pinned_memory=use_pinned_memory,
@@ -76,6 +78,7 @@ def create_app(
             "status": "ok",
             "model": model,
             "backend": backend,
+            "kv_mode": kv_mode,
             "engine": engine.info(),
             "max_batch_size": max_batch_size,
             "max_batched_tokens": max_batched_tokens,
@@ -132,7 +135,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dtype", default="bfloat16", choices=["auto", "float32", "float16", "bfloat16"])
     parser.add_argument("--device", default=None)
-    parser.add_argument("--backend", default="hf", choices=["hf", "course", "paged"])
+    parser.add_argument("--backend", default="course", choices=["reference", "course", "hf", "paged"])
+    parser.add_argument("--kv-mode", default="paged", choices=["dense", "paged"])
     parser.add_argument("--stage", default=None, help="course stage such as week04 or 4")
     parser.add_argument("--kernel-impl", default="torch", choices=["torch", "auto", "cuda"])
     parser.add_argument("--pinned-memory", action="store_true")
@@ -150,6 +154,7 @@ def main() -> None:
         dtype=args.dtype,
         device=args.device,
         backend=args.backend,
+        kv_mode=args.kv_mode,
         stage=args.stage,
         kernel_impl=args.kernel_impl,
         use_pinned_memory=args.pinned_memory,

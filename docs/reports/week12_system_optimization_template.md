@@ -16,7 +16,8 @@ Baseline:
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -43,7 +44,8 @@ Optimized:
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week12 \
   --kernel-impl auto \
   --dtype bfloat16 \

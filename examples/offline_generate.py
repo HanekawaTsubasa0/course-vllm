@@ -13,7 +13,8 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=None, help="maximum generated tokens; omit for no explicit limit")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--dtype", default="bfloat16")
-    parser.add_argument("--backend", default="hf", choices=["hf", "course", "paged"])
+    parser.add_argument("--backend", default="course", choices=["reference", "course", "hf", "paged"])
+    parser.add_argument("--kv-mode", default="paged", choices=["dense", "paged"])
     parser.add_argument("--stage", default=None, help="course stage such as week04 or 4")
     parser.add_argument("--kernel-impl", default="torch", choices=["torch", "auto", "cuda"])
     parser.add_argument("--pinned-memory", action="store_true")
@@ -27,6 +28,7 @@ def main() -> None:
         args.model,
         dtype=args.dtype,
         backend=args.backend,
+        kv_mode=args.kv_mode,
         stage=args.stage,
         kernel_impl=args.kernel_impl,
         use_pinned_memory=args.pinned_memory,

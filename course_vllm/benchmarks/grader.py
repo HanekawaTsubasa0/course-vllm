@@ -46,6 +46,7 @@ STAGE_TESTS = {
     "week15": [
         "tests/test_benchmarks.py::test_cache_aware_order_improves_shared_prefix_score",
         "tests/test_benchmarks.py::test_paper_to_system_map_lists_engine_modules",
+        "tests/test_benchmarks.py::test_frontier_demos_produce_comparable_metrics",
     ],
 }
 

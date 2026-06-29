@@ -1,6 +1,7 @@
 import torch
 
 from course_vllm.engine.engine import Engine
+from course_vllm.engine.engine import normalize_backend_config
 from course_vllm.engine.sampler import SamplingParams
 from course_vllm.model.types import BatchModelOutput, ModelOutput
 
@@ -149,6 +150,7 @@ def test_engine_info_reports_course_stage_and_kernel_impl():
     engine = object.__new__(Engine)
     engine.backend = FakeBackend()
     engine.backend_name = "fake"
+    engine.kv_mode = "dense"
     engine.stage = "week04"
     engine.kernel_impl = "auto"
     engine.use_pinned_memory = False
@@ -157,5 +159,14 @@ def test_engine_info_reports_course_stage_and_kernel_impl():
     info = engine.info()
 
     assert info["backend"] == "fake"
+    assert info["kv_mode"] == "dense"
     assert info["kernel_impl"] == "auto"
     assert info["stage"]["key"] == "week04"
+
+
+def test_backend_config_normalizes_public_names_and_legacy_aliases():
+    assert normalize_backend_config("reference", "paged") == ("reference", "dense")
+    assert normalize_backend_config("course", "dense") == ("course", "dense")
+    assert normalize_backend_config("course", "paged") == ("course", "paged")
+    assert normalize_backend_config("hf", "paged") == ("reference", "dense")
+    assert normalize_backend_config("paged", "dense") == ("course", "paged")

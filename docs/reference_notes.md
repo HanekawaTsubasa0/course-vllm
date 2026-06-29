@@ -63,7 +63,8 @@ Reference for readable transformer code:
   paged-attention decode kernel and keeps `paged_attention_decode_reference` as the readable PyTorch
   oracle. The kernel reads physical slots through each sequence block table, handles grouped-query KV
   heads, and is checked against dense attention when CUDA is visible.
-- `course_vllm.model.qwen3_backend.Qwen3PagedBackend` puts that paged storage on the real prefill/decode
+- `course_vllm.model.qwen3_backend.Qwen3PagedBackend` is the course paged-KV runner used by
+  `--backend course --kv-mode paged`; it puts that paged storage on the real prefill/decode
   path. Its decode path writes each new token KV into physical slots, then reads prior context through
   `paged_attention_decode`; dense readback remains available for debug and correctness checks.
 - `course_vllm.kernels.cuda_ops` wraps compact handwritten CUDA kernels for RMSNorm, RoPE, row-wise
@@ -76,8 +77,8 @@ Reference for readable transformer code:
   prefill priority and decode batches.
 - `Engine.generate_batch` now drives multiple requests through that scheduler, and backend prefill is
   executed as one padded model forward. Decode still enters the backend `decode_batch` interface.
-  The continuous-cache Qwen3 backend executes same-length decode batches as one model forward; the
-  paged backend uses paged attention and can decode a batch with mixed context lengths.
+  The dense-KV runner executes same-length decode batches as one model forward; the paged-KV runner
+  uses paged attention and can decode a batch with mixed context lengths.
 - `course_vllm.server.batching.BatchingEngine` connects HTTP requests to `Engine.generate_batch` and
   `Engine.generate_stream` through an async queue plus a dedicated model worker thread.
 - `course_vllm.benchmarks.bench_server` is the first HTTP throughput/latency probe. It is intentionally

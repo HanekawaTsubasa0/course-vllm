@@ -78,17 +78,21 @@ REMOTE_URL=git@github.com:HanekawaTsubasa0/course-vllm.git \
 服务和离线脚本都支持：
 
 ```text
---backend hf|course|paged
+--backend reference|course
+--kv-mode dense|paged
 --stage week01..week16
 --kernel-impl torch|auto|cuda
 ```
 
-- `hf`: HuggingFace 参考后端。
-- `course`: 课程自有 Qwen3 + 连续 KV cache。
-- `paged`: 课程自有 Qwen3 + paged KV cache。
+- `reference`: HuggingFace/PyTorch oracle，只用于 correctness 对齐和评测参考。
+- `course`: 课程主线 engine，调度、KV cache、CUDA kernel 和服务化都在这里展开。
+- `kv-mode=dense`: 连续 KV cache，用于讲清最直观的 append/fetch。
+- `kv-mode=paged`: paged KV cache 和 block table，是后半学期 serving 主线。
 - `kernel-impl=torch`: 只走 PyTorch/reference。
 - `kernel-impl=auto`: CUDA tensor 上优先课程 CUDA kernel，失败回退。
 - `kernel-impl=cuda`: 强制课程 CUDA kernel，kernel 不可用时报错。
+
+兼容说明：早期脚本中的 `--backend hf` 会映射到 `reference`，`--backend paged` 会映射到 `course --kv-mode paged`；新讲义和课堂命令统一使用 `reference|course` 加 `dense|paged`。
 
 ## 1. Week 01 课程导论与 Baseline Serving
 
@@ -112,7 +116,8 @@ REMOTE_URL=git@github.com:HanekawaTsubasa0/course-vllm.git \
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week01 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -183,7 +188,8 @@ Torch profiler：
 ```bash
 python scripts/profile/torch_profiler.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --max-tokens 8 \
   --out profiles/torch_profiler \
   | tee profiles/reports/torch_profiler_summary.txt
@@ -192,7 +198,7 @@ python scripts/profile/torch_profiler.py \
 Nsight Systems：
 
 ```bash
-MODEL=Qwen/Qwen3-0.6B BACKEND=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready \
+MODEL=Qwen/Qwen3-0.6B BACKEND=course KV_MODE=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready \
   bash scripts/profile/nsys_server.sh \
   | tee profiles/reports/nsys_server_ready_summary.txt
 ```
@@ -200,7 +206,9 @@ MODEL=Qwen/Qwen3-0.6B BACKEND=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsy
 Nsight Compute：
 
 ```bash
-OUT=profiles/ncu_kernels bash scripts/profile/ncu_kernel.sh \
+KERNEL_SCENARIO=paged_attention OUT=profiles/ncu_paged_attention bash scripts/profile/ncu_kernel.sh \
+  | tee profiles/reports/ncu_paged_attention_summary.txt
+KERNEL_SCENARIO=matmul KERNEL_NAME=matmul OUT=profiles/ncu_matmul bash scripts/profile/ncu_kernel.sh \
   | tee profiles/reports/ncu_kernel_summary.txt
 ```
 
@@ -293,7 +301,8 @@ python -m pytest -q \
 ```bash
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week04 \
   --kernel-impl auto \
   --prompt "Hello" \
@@ -502,7 +511,8 @@ python -m course_vllm.benchmarks.grader week08
 
 ```bash
 python -m pytest -q tests/test_engine.py tests/test_chat_client.py
-python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend paged --max-tokens 8
+python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend course \
+  --kv-mode paged --max-tokens 8
 ```
 
 ### 学生任务
@@ -598,7 +608,8 @@ python -m pytest -q tests/test_scheduler.py tests/test_server_batching.py
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -675,7 +686,8 @@ python -m course_vllm.benchmarks.system_optimization \
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week12 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -733,8 +745,8 @@ python -m course_vllm.benchmarks.grader cuda_smoke
 
 ### 教学目标
 
-- 讲 TP/PP/EP/NCCL/placement。
-- 在单卡上估算 KV cache 容量和多卡触发条件。
+- 讲 TP/PP/EP/CP、NCCL 通信和 placement。
+- 在单卡上估算 KV cache 容量，并用理论模型估算多卡后的计算量、通信量、显存拆分和瓶颈。
 
 ### 代码入口
 
@@ -750,8 +762,16 @@ python -m course_vllm.benchmarks.capacity_planner \
   --num-layers 28 \
   --num-kv-heads 8 \
   --head-dim 128 \
+  --hidden-size 1024 \
+  --intermediate-size 2816 \
   --block-size 16 \
   --max-model-len 2048 \
+  --tp 2 \
+  --pp 2 \
+  --ep 1 \
+  --cp 2 \
+  --microbatch-size 4 \
+  --network-bandwidth-gbps 200 \
   --target-concurrency 32 \
   --target-sequence-len 2048 \
   --report
@@ -763,13 +783,18 @@ python -m course_vllm.benchmarks.capacity_planner \
 - KV blocks
 - token slots
 - full-length sequences
-- target concurrency 是否需要多卡扩容
+- TP all-reduce bytes/token
+- PP bubble fraction
+- EP all-to-all bytes/token
+- CP pass-Q/pass-KV bytes
+- target concurrency 是否需要多卡扩容，以及 compute-bound / communication-bound 判断
 
 ### 学生任务
 
 - 修改 target concurrency，找到需要多卡的阈值。
 - 比较 float16/bfloat16/int8/fp8 对 KV 容量的影响。
-- 说明何时是容量瓶颈，何时是吞吐瓶颈。
+- 比较 TP/PP/EP/CP 参数变化对计算量、通信量和显存的影响。
+- 说明何时是容量瓶颈，何时是吞吐瓶颈，何时通信开销会抵消多卡收益。
 
 ### 自动评测
 
@@ -821,12 +846,20 @@ python -m course_vllm.benchmarks.grader week13
 python -m course_vllm.benchmarks.cache_aware_demo \
   --mechanism "cache-aware serving" \
   --prompts "1,2,3,4|1,2,3,9|8,7|1,2,5"
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "prefill-decode disaggregation" \
+  --requests "128:16|2048:8|256:64|1024:12"
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "tokendance-style scheduling" \
+  --requests "128:32|2048:4|256:16"
 ```
 
 示例结果字段：
 
 - baseline shared-prefix score
 - cache-aware shared-prefix score
+- PD disaggregation estimated speedup
+- TokenDance-style completion cost
 - mapped modules: `engine/policies.py`, `engine/block_manager.py`, `engine/engine.py`
 
 ### 学生任务
@@ -869,7 +902,8 @@ for mode in forward decode batch-prefill batch-decode; do
   echo "=== $mode ==="
   python validation/compare_qwen3.py "$mode" \
     --model Qwen/Qwen3-0.6B \
-    --backend paged \
+    --backend course \
+    --kv-mode paged \
     --dtype float32
 done
 ```
@@ -884,8 +918,9 @@ pytest -q tests/test_kernels.py tests/test_attention.py -rs
 4. profiling：
 
 ```bash
-python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend paged --max-tokens 8
-MODEL=Qwen/Qwen3-0.6B BACKEND=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready bash scripts/profile/nsys_server.sh
+python scripts/profile/torch_profiler.py --model Qwen/Qwen3-0.6B --backend course \
+  --kv-mode paged --max-tokens 8
+MODEL=Qwen/Qwen3-0.6B BACKEND=course KV_MODE=paged DTYPE=bfloat16 MAX_TOKENS=8 OUT=profiles/nsys_server_ready bash scripts/profile/nsys_server.sh
 ```
 
 5. capacity planning：
@@ -904,6 +939,8 @@ python -m course_vllm.benchmarks.capacity_planner \
 
 ```bash
 python -m course_vllm.benchmarks.cache_aware_demo --mechanism "cache-aware serving"
+python -m course_vllm.benchmarks.cache_aware_demo --mechanism "prefill-decode disaggregation"
+python -m course_vllm.benchmarks.cache_aware_demo --mechanism "tokendance-style scheduling"
 ```
 
 ### 最终交付物
@@ -957,7 +994,7 @@ export TRANSFORMERS_OFFLINE=1
 也可以手动：
 
 ```bash
-NCU_BIN=/usr/local/cuda-12.8/bin/ncu OUT=profiles/ncu_kernels bash scripts/profile/ncu_kernel.sh
+NCU_BIN=/usr/local/cuda-12.8/bin/ncu KERNEL_SCENARIO=paged_attention OUT=profiles/ncu_paged_attention bash scripts/profile/ncu_kernel.sh
 ```
 
 ### ncu 无 performance counter 权限

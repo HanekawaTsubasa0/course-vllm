@@ -37,7 +37,8 @@ Baseline 服务使用 Week 11 配置：
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -53,7 +54,8 @@ Optimized 服务打开 Week 12 开关：
 ```bash
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week12 \
   --kernel-impl auto \
   --dtype bfloat16 \

@@ -67,7 +67,8 @@ python -m course_vllm.benchmarks.grader week12
 
 python -m course_vllm.server.api \
   --model "$MODEL" \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week01 \
   --kernel-impl auto \
   --dtype bfloat16 \

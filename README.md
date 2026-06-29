@@ -1,6 +1,6 @@
-# course-vllm
+# course-llm-serving
 
-`course-vllm` 是一个面向 LLM serving 课程的小型单卡推理服务工程。它的目标不是复刻工业级 vLLM/sglang，而是在一套可运行、可测试的代码里讲清楚：
+`course-llm-serving` 是一个面向 LLM serving 课程的小型推理服务工程。当前 Python 包名仍保留为 `course_vllm`，以减少既有脚本和测试的迁移成本；课程文档中统一把它称为 course LLM serving 工程。它的目标不是复刻工业级 vLLM/sglang，而是在一套可运行、可测试的代码里讲清楚：
 
 - prefill / decode
 - KV cache
@@ -18,10 +18,16 @@
 工程显式暴露课程阶段和算子实现开关：
 
 ```bash
+--backend reference|course
+--kv-mode dense|paged
 --stage week04
 --kernel-impl torch|auto|cuda
 ```
 
+- `backend=reference` 使用 HuggingFace/PyTorch 作为正确性 oracle，只用于对齐和评测参考。
+- `backend=course` 使用课程主线 engine；连续 KV 与 paged KV 通过 `kv-mode` 选择。
+- `kv-mode=dense` 使用连续 KV cache，便于先理解 append/fetch。
+- `kv-mode=paged` 使用 block table 和 paged KV cache，是后半学期 serving 主线。
 - `stage` 用来标记当前实验周次，`/health` 会返回对应周次、主题、代码状态和测试提示。
 - `kernel-impl=torch` 保持纯 PyTorch/reference 路径。
 - `kernel-impl=auto` 在 CUDA tensor 上优先尝试课程 CUDA kernel，失败时回退 PyTorch。
@@ -89,7 +95,8 @@ python -m course_vllm.benchmarks.grader cuda_smoke
 ```bash
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week04 \
   --kernel-impl auto \
   --chat \
@@ -102,7 +109,8 @@ python examples/offline_generate.py \
 ```bash
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week04 \
   --kernel-impl auto \
   --chat \
@@ -118,7 +126,8 @@ python examples/offline_generate.py \
 ```bash
 python examples/offline_generate.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week04 \
   --kernel-impl auto \
   --prompts "Hello|What is KV cache?" \
@@ -146,7 +155,8 @@ source .venv/bin/activate
 
 python -m course_vllm.server.api \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --kernel-impl auto \
   --dtype bfloat16 \
@@ -288,17 +298,26 @@ python -m course_vllm.benchmarks.capacity_planner \
   --num-layers 28 \
   --num-kv-heads 8 \
   --head-dim 128 \
+  --hidden-size 1024 \
+  --intermediate-size 2816 \
+  --tp 2 \
+  --pp 2 \
+  --cp 2 \
   --target-concurrency 32 \
   --target-sequence-len 2048 \
   --report
 ```
 
+报告会同时输出 KV 容量、TP all-reduce、PP bubble、EP all-to-all、CP pass-Q/pass-KV 等字段，用于判断容量瓶颈、计算瓶颈和通信瓶颈。
+
 性能分析脚本：
 
 ```bash
 bash scripts/profile/nsys_server.sh
-bash scripts/profile/ncu_kernel.sh
-python scripts/profile/torch_profiler.py --backend paged --max-tokens 8
+KERNEL_SCENARIO=paged_attention bash scripts/profile/ncu_kernel.sh
+KERNEL_SCENARIO=matmul KERNEL_NAME=matmul bash scripts/profile/ncu_kernel.sh
+python scripts/profile/torch_profiler.py --backend course \
+  --kv-mode paged --workload mixed --warmup 1 --repeat 3 --max-tokens 8
 python -m course_vllm.benchmarks.system_optimization --pinned-memory --transfer-stream
 ```
 
@@ -319,6 +338,12 @@ python -m course_vllm.benchmarks.grader week15
 python -m course_vllm.benchmarks.cache_aware_demo \
   --mechanism "cache-aware serving" \
   --prompts "1,2,3,4|1,2,3,9|8,7|1,2,5"
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "prefill-decode disaggregation" \
+  --requests "128:16|2048:8|256:64|1024:12"
+python -m course_vllm.benchmarks.cache_aware_demo \
+  --mechanism "tokendance-style scheduling" \
+  --requests "128:32|2048:4|256:16"
 ```
 
 ## 正确性验证
@@ -348,17 +373,20 @@ python validation/compare_qwen3.py forward \
 
 python validation/compare_qwen3.py decode \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --dtype float32
 
 python validation/compare_qwen3.py batch-prefill \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --dtype float32
 
 python validation/compare_qwen3.py batch-decode \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --dtype float32
 ```
 
@@ -388,8 +416,8 @@ course_vllm/
   model/
     hf_backend.py       HuggingFace 参考 backend
     qwen3_torch.py      课程自有 Qwen3 PyTorch 模型实现
-    qwen3_continuous_backend.py  course backend，连续 KV cache 的 prefill/decode/batch decode
-    qwen3_paged_backend.py       paged backend，paged KV cache 的 prefill/decode/batch decode
+    qwen3_continuous_backend.py  dense KV runner，连续 KV cache 的 prefill/decode/batch decode
+    qwen3_paged_backend.py       paged KV runner，paged KV cache 的 prefill/decode/batch decode
     qwen3_backend.py             兼容导出 Qwen3TorchBackend / Qwen3PagedBackend
     attention.py        dense attention、paged attention reference、CUDA dispatch
     types.py            ModelOutput / BatchModelOutput
@@ -432,23 +460,24 @@ docs/file_guide.md
 
 ## 功能说明
 
-### Backend
+### Backend 与 KV Mode
 
-工程有三个 backend：
+工程只向学生暴露两个 backend 概念：
 
 ```text
-hf      使用 HuggingFace 模型作为稳定参考路径
-course  使用课程自有 Qwen3 PyTorch 实现和连续 KV cache
-paged   使用课程自有 Qwen3 PyTorch 实现和 paged KV cache
+reference  HuggingFace/PyTorch oracle，用于 correctness 对齐，不作为课程主线
+course     课程主线 engine，调度、KV cache、CUDA kernel、服务化都在这里展开
 ```
 
-启动服务时通过 `--backend` 选择：
+KV cache 形态不是第三个 backend，而是 `course` backend 内部的实现模式：
 
 ```bash
---backend hf
---backend course
---backend paged
+--backend reference
+--backend course --kv-mode dense
+--backend course --kv-mode paged
 ```
+
+为了兼容早期脚本，`--backend hf` 会映射到 `reference`，`--backend paged` 会映射到 `course --kv-mode paged`。新文档和实验统一使用 `reference|course` 加 `dense|paged` 的写法。
 
 ### Prefill / Decode
 
@@ -456,7 +485,7 @@ paged   使用课程自有 Qwen3 PyTorch 实现和 paged KV cache
 
 ### KV Cache
 
-`course_vllm/engine/kv_cache.py` 实现连续 KV cache，用于教学中最直观的 KV 存储方式。`course` backend 使用这种缓存。
+`course_vllm/engine/kv_cache.py` 实现连续 KV cache，用于教学中最直观的 KV 存储方式。运行时通过 `--backend course --kv-mode dense` 使用这种缓存。
 
 ### Paged KV Cache
 
@@ -467,7 +496,7 @@ paged   使用课程自有 Qwen3 PyTorch 实现和 paged KV cache
 - block table 把逻辑 token 位置映射到物理 KV slot。
 - 请求结束后释放 block。
 
-`paged` backend 会把每层 K/V 写进物理 slot，并在 decode 阶段通过 block table 读取历史上下文。
+`--backend course --kv-mode paged` 会把每层 K/V 写进物理 slot，并在 decode 阶段通过 block table 读取历史上下文。
 
 ### Continuous Batching
 

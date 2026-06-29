@@ -12,6 +12,21 @@ from course_vllm.model.types import ModelOutput
 from course_vllm.stages import normalize_stage, stage_overview
 
 
+def normalize_backend_config(backend: str, kv_mode: str = "paged") -> tuple[str, str]:
+    """Normalize public backend/kv-mode settings while preserving old aliases."""
+    if backend == "hf":
+        return "reference", "dense"
+    if backend == "paged":
+        return "course", "paged"
+    if backend not in {"reference", "course"}:
+        raise ValueError("unsupported backend: expected reference or course")
+    if kv_mode not in {"dense", "paged"}:
+        raise ValueError("unsupported kv_mode: expected dense or paged")
+    if backend == "reference":
+        return backend, "dense"
+    return backend, kv_mode
+
+
 class Engine:
     def __init__(
         self,
@@ -19,7 +34,8 @@ class Engine:
         *,
         dtype: str = "bfloat16",
         device: str | None = None,
-        backend: str = "hf",
+        backend: str = "course",
+        kv_mode: str = "paged",
         stage: str | int | None = None,
         kernel_impl: str = "torch",
         use_pinned_memory: bool = False,
@@ -29,9 +45,10 @@ class Engine:
         self.kernel_impl = kernel_impl
         self.use_pinned_memory = use_pinned_memory
         self.use_transfer_stream = use_transfer_stream
-        if backend == "hf":
+        backend, kv_mode = normalize_backend_config(backend, kv_mode)
+        if backend == "reference":
             self.backend = HFModelBackend(model, dtype=dtype, device=device)
-        elif backend == "course":
+        elif kv_mode == "dense":
             self.backend = Qwen3TorchBackend(
                 model,
                 dtype=dtype,
@@ -40,7 +57,7 @@ class Engine:
                 use_pinned_memory=use_pinned_memory,
                 use_transfer_stream=use_transfer_stream,
             )
-        elif backend == "paged":
+        elif kv_mode == "paged":
             self.backend = Qwen3PagedBackend(
                 model,
                 dtype=dtype,
@@ -50,8 +67,9 @@ class Engine:
                 use_transfer_stream=use_transfer_stream,
             )
         else:
-            raise ValueError(f"unsupported backend: {backend}")
+            raise ValueError(f"unsupported kv_mode: {kv_mode}")
         self.backend_name = backend
+        self.kv_mode = kv_mode
 
     @property
     def tokenizer(self):
@@ -60,6 +78,7 @@ class Engine:
     def info(self) -> dict:
         return {
             "backend": self.backend_name,
+            "kv_mode": self.kv_mode,
             "stage": stage_overview(self.stage),
             "kernel_impl": self.kernel_impl,
             "model_backend": type(self.backend).__name__,

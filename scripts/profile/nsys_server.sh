@@ -3,7 +3,8 @@ set -euo pipefail
 
 PORT="${PORT:-18080}"
 MODEL="${MODEL:-Qwen/Qwen3-0.6B}"
-BACKEND="${BACKEND:-paged}"
+BACKEND="${BACKEND:-course}"
+KV_MODE="${KV_MODE:-paged}"
 DTYPE="${DTYPE:-bfloat16}"
 MAX_TOKENS="${MAX_TOKENS:-32}"
 OUT="${OUT:-profiles/nsys_server}"
@@ -32,6 +33,7 @@ fi
 python -m course_vllm.server.api \
     --model "$MODEL" \
     --backend "$BACKEND" \
+    --kv-mode "$KV_MODE" \
     --dtype "$DTYPE" \
     --stage week02 \
     --port "$PORT" &

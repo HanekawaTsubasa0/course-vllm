@@ -7,7 +7,8 @@
 - CUDA: 12.8
 - PyTorch: 2.8.0+cu128
 - 模型: Qwen/Qwen3-0.6B
-- backend: paged
+- backend: course
+- kv_mode: paged
 - dtype: bfloat16
 - stage: week02/week09 profiling path
 
@@ -21,7 +22,8 @@ export TRANSFORMERS_OFFLINE=1
 
 python scripts/profile/torch_profiler.py \
   --model Qwen/Qwen3-0.6B \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --max-tokens 8 \
   --out profiles/torch_profiler \
   | tee profiles/reports/torch_profiler_summary.txt

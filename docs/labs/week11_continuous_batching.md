@@ -31,7 +31,8 @@ HTTP 服务开启：
 
 ```bash
 python -m course_vllm.server.api \
-  --backend paged \
+  --backend course \
+  --kv-mode paged \
   --stage week11 \
   --enable-chunked-prefill \
   --max-batch-size 8 \

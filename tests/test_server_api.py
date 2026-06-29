@@ -9,6 +9,7 @@ class FakeEngine:
         dtype,
         device,
         backend,
+        kv_mode,
         stage,
         kernel_impl,
         use_pinned_memory=False,
@@ -18,6 +19,7 @@ class FakeEngine:
         self.backend = type("Backend", (), {"apply_chat_template": lambda self, messages: "chat"})()
         self._info = {
             "backend": backend,
+            "kv_mode": kv_mode,
             "stage": {"key": stage},
             "kernel_impl": kernel_impl,
             "model_backend": "FakeBackend",
@@ -36,6 +38,7 @@ def test_create_app_health_reports_stage_and_kernel_impl(monkeypatch):
     app = api.create_app(
         "fake-model",
         backend="course",
+        kv_mode="paged",
         stage="week04",
         kernel_impl="auto",
         use_pinned_memory=True,
@@ -50,6 +53,8 @@ def test_create_app_health_reports_stage_and_kernel_impl(monkeypatch):
     health = next(route.endpoint for route in app.routes if getattr(route, "path", None) == "/health")()
 
     assert health["status"] == "ok"
+    assert health["kv_mode"] == "paged"
+    assert health["engine"]["kv_mode"] == "paged"
     assert health["engine"]["stage"]["key"] == "week04"
     assert health["engine"]["kernel_impl"] == "auto"
     assert health["engine"]["system_optimizations"]["pinned_memory"] is True

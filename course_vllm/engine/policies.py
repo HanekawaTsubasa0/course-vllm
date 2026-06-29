@@ -36,6 +36,49 @@ def score_order(prompts: list[list[int]], order: list[int]) -> int:
     return score
 
 
+def estimate_pd_disaggregation(
+    requests: list[dict[str, int]],
+    *,
+    prefill_tokens_per_s: float = 4000.0,
+    decode_tokens_per_s: float = 250.0,
+) -> dict:
+    """Estimate a teaching approximation of prefill/decode disaggregation."""
+    if prefill_tokens_per_s <= 0 or decode_tokens_per_s <= 0:
+        raise ValueError("throughput values must be positive")
+    total_prefill = sum(max(0, request["prompt_len"]) for request in requests)
+    total_decode = sum(max(0, request["decode_len"]) for request in requests)
+    coupled_s = total_prefill / prefill_tokens_per_s + total_decode / decode_tokens_per_s
+    disaggregated_s = max(total_prefill / prefill_tokens_per_s, total_decode / decode_tokens_per_s)
+    return {
+        "total_prefill_tokens": total_prefill,
+        "total_decode_tokens": total_decode,
+        "coupled_time_s": coupled_s,
+        "disaggregated_time_s": disaggregated_s,
+        "estimated_speedup": coupled_s / disaggregated_s if disaggregated_s else 1.0,
+    }
+
+
+def tokendance_order(requests: list[dict[str, int]]) -> list[int]:
+    """Prioritize short remaining decode work while keeping older requests stable."""
+    return sorted(
+        range(len(requests)),
+        key=lambda index: (
+            max(0, requests[index]["decode_len"] - requests[index].get("generated", 0)),
+            requests[index].get("age", index),
+            index,
+        ),
+    )
+
+
+def score_decode_completion_cost(requests: list[dict[str, int]], order: list[int]) -> int:
+    elapsed = 0
+    total_completion = 0
+    for index in order:
+        elapsed += max(0, requests[index]["decode_len"] - requests[index].get("generated", 0))
+        total_completion += elapsed
+    return total_completion
+
+
 def paper_to_system_map(mechanism: str) -> dict:
     mappings = {
         "cache-aware serving": {
