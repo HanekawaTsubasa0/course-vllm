@@ -41,6 +41,8 @@
 - `kernel-impl=auto` 在 CUDA tensor 上优先尝试课程 CUDA kernel，不可用时回退。
 - `kernel-impl=cuda` 强制走课程 CUDA kernel，适合验收 CUDA 是否真正接入。
 
+周次说明在 `docs/labs/`，按周学习讲义在 `docs/teaching/README.md`。
+
 ## 环境配置
 
 进入项目并创建虚拟环境：
