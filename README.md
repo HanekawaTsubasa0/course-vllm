@@ -39,7 +39,8 @@
 
 - `docs/project_usage_guide.md`：项目怎么安装、运行、验证、压测、生成学生分支。
 - `docs/code_walkthrough.md`：按模块讲清楚所有核心代码、调用链和设计取舍。
-- `docs/course_code_teaching_guide.md`：按周对着代码讲每节课任务、学生 TODO 和运行方式。
+- `docs/course_code_teaching_guide.md`：教师按周讲代码、实验位置和运行方式时使用。
+- `docs/teaching/README.md`：按周学习讲义，覆盖核心概念、机制、术语和本工程对应实现。
 - `docs/course_teaching_runbook.md`：教师/助教逐周上课运行手册。
 - `docs/runnable_validation_guide.md`：正确性、profiling、benchmark、报告产物的可复现验收指南。
 
