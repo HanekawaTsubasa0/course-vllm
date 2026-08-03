@@ -8,8 +8,8 @@
 
 ### 第一篇：服务与性能基础
 
-- [第 1 章：一次回答是怎样被生成出来的](part1_foundations/week01_serving_metrics.md)
-- [第 2 章：性能分析不是猜哪里慢](part1_foundations/week02_profiling_roofline.md)
+- [第 1 章：大语言模型在线推理的请求流程与性能指标](part1_foundations/week01_serving_metrics.md)
+- [第 2 章：GPU 性能分析的证据层次与 Roofline 模型](part1_foundations/week02_profiling_roofline.md)
 
 这一篇建立全书共同语言：token、prefill、decode、KV cache、TTFT、TPOT、吞吐、尾延迟、GPU 异步执行和 Roofline。
 
@@ -26,9 +26,9 @@
 ### 第三篇：KV 状态与推理引擎
 
 - [第 8 章：自回归推理中的 KV Cache](part3_serving_engine/week08_kv_cache.md)（来源驱动样章）
-- [第 9 章：一个请求如何穿过推理引擎](part3_serving_engine/week09_engine_request_lifecycle.md)
+- [第 9 章：在线推理引擎的请求状态与资源生命周期](part3_serving_engine/week09_engine_request_lifecycle.md)
 - [第 10 章：Paged KV Cache 的地址映射与内存管理](part3_serving_engine/week10_paged_kv_block_manager.md)（来源驱动样章）
-- [第 11 章：Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
+- [第 11 章：迭代级调度与 Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
 - [第 12 章：系统优化必须闭环](part3_serving_engine/week12_system_optimization.md)
 
 这一篇把视角从单次前向扩展到多请求系统：历史状态怎样存放，请求怎样调度，显存怎样分配，优化结论怎样用证据闭环。

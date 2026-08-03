@@ -1,6 +1,6 @@
-# Week 11：Continuous Batching，GPU 下一轮该算谁
+# 第 11 章：迭代级调度与 Continuous Batching
 
-## Fixed Batch 为什么不适合逐 Token 生成
+## 11.1 固定批处理中的空闲执行槽位
 
 图像分类中，一批图片通常执行一次模型就全部完成。LLM 请求却有不同 prompt 长度和输出长度：
 
@@ -12,7 +12,7 @@ C: prompt 32，输出 8
 
 如果 A/B/C 组成固定 batch，必须等 B 生成 64 token 后整批结束。A 在第 4 轮完成，后面 60 轮都留下空位；C 也长期等待 B。
 
-Continuous batching 的核心是把“batch 生命周期”从整条请求缩短到一次模型迭代：
+Continuous batching（连续批处理）的核心是把 batch 的有效期从完整请求缩短到一次模型迭代。在每个迭代边界，调度器都可以移除已完成序列、保留未完成序列，并接纳新的工作：
 
 ```text
 每轮重新选择 sequence
@@ -24,9 +24,9 @@ Continuous batching 的核心是把“batch 生命周期”从整条请求缩短
 
 ---
 
-## 一、Iteration-Level Scheduling
+## 11.2 Iteration-Level Scheduling
 
-一次迭代通常包含：
+[Orca](https://www.usenix.org/conference/osdi22/presentation/yu)把这种机制称为 iteration-level scheduling：调度器每次只要求执行引擎运行一个模型迭代，而不是把一批请求持续运行到全部结束。一次迭代通常包含：
 
 1. 调度器查看 waiting/running；
 2. 根据预算选择 prefill/decode 工作；
@@ -48,17 +48,17 @@ flowchart LR
 
 迭代边界是重新组织 batch 的机会，也是调度开销出现的位置。
 
-## 二、Waiting 与 Running
+## 11.3 Sequence 状态与资源占用
 
-### Waiting
+### 11.3.1 Waiting
 
 已经进入系统，但尚未完成可运行 prefill 的请求。Chunked prefill 时，也可能包含只处理了部分 prompt 的 sequence。
 
-### Running
+### 11.3.2 Running
 
 已经拥有运行状态和 KV，通常正在 decode，或在 chunked prefill 中已占用部分资源。
 
-### Finished
+### 11.3.3 Finished
 
 达到 EOS/stop/length/cancel，离开调度并释放资源。
 
@@ -71,9 +71,9 @@ flowchart LR
 恢复需要什么成本？
 ```
 
-## 三、调度器面对三种预算
+## 11.4 Sequence、Token 与 KV 三类预算
 
-### Sequence Budget
+### 11.4.1 Sequence Budget
 
 ```text
 max_num_seqs
@@ -81,7 +81,7 @@ max_num_seqs
 
 限制一轮或运行集合最多多少 sequences。
 
-### Token Budget
+### 11.4.2 Token Budget
 
 ```text
 max_num_batched_tokens
@@ -89,7 +89,7 @@ max_num_batched_tokens
 
 限制本轮处理的 token 总数。Prefill 请求可能贡献数百/数千 token；decode sequence 通常贡献 1。
 
-### KV Capacity
+### 11.4.3 KV Capacity
 
 即使 token budget 允许，本轮工作也可能需要新 KV blocks。BlockManager 必须确认容量。
 
@@ -106,7 +106,40 @@ flowchart TB
 
 只设置 max batch size 无法保护系统，因为 8 个 8k prompt 与 8 个 decode token 成本完全不同。
 
-## 四、Prefill 与 Decode 为什么互相干扰
+## 11.5 一次调度决策的预算推演
+
+设某一迭代开始时有两个 running sequences 和两个 waiting requests：
+
+| 序列 | 当前阶段 | 已计算长度 | 本轮待处理 token |
+| --- | --- | ---: | ---: |
+| D1 | decode | 100 | 1 |
+| D2 | decode | 220 | 1 |
+| P1 | prefill | 0 | 6 |
+| P2 | prefill | 0 | 5 |
+
+调度配置为 `max_num_seqs=4`、`max_num_batched_tokens=8`，当前还可写入 12 个 KV token slots。令 $s_i$ 表示序列 $i$ 本轮实际送入模型的 token 数，$\Delta k_i$ 表示它本轮需要新增的 KV slots。一个合法调度结果至少满足
+
+$$
+|\mathcal{B}|\leq 4,\qquad
+\sum_{i\in\mathcal{B}}s_i\leq 8,\qquad
+\sum_{i\in\mathcal{B}}\Delta k_i\leq 12.
+$$
+
+采用“先维持 running decode，再按 FCFS 接纳 prefill”的教学策略时，D1 和 D2 各消耗 1 个 token budget 与 1 个 KV slot。此后 token budget 剩余 6，恰好可以处理 P1 的完整 prompt；P2 本轮继续等待。形成的逻辑 batch 为
+
+```text
+D1: decode 1 token
+D2: decode 1 token
+P1: prefill 6 tokens
+total scheduled tokens = 8
+new KV slots = 8
+```
+
+本轮结束后，D1/D2 的计算长度分别变为 101 和 221；P1 的 prompt 已完成，并由最后位置 logits 产生首 token；KV 仍有 4 个空闲 slots。下一轮调度必须重新计算预算，不能沿用上一轮 batch。
+
+三类预算在这个基础例子中恰好同步增长，但概念上仍然独立。Prefix cache hit 可能使输入 prompt 很长而新增 KV 很少；speculative decoding 可能在一次迭代提出并验证多个 token；某些执行器也会把逻辑 batch 拆成不同 kernel 调用。因此调度器必须从 backend 能力和 cache manager 获取实际工作量，不能把请求数乘以平均长度作为资源判断。
+
+## 11.6 Prefill 与 Decode 的共享资源竞争
 
 Prefill 可能一次处理长 prompt，耗时较长；decode 每个 sequence 只有一个 token，但用户希望稳定地看到输出。
 
@@ -122,7 +155,7 @@ Prefill 可能一次处理长 prompt，耗时较长；decode 每个 sequence 只
 
 调度策略是在新用户与正在生成用户之间分配 GPU 时间，没有脱离 workload/SLO 的绝对最优。
 
-## 五、Head-of-Line Blocking
+## 11.7 Head-of-Line Blocking
 
 FIFO waiting：
 
@@ -143,7 +176,7 @@ S2: 32-token prompt
 
 但短任务优先也可能让长任务饥饿，需要 aging 或公平性约束。
 
-## 六、Chunked Prefill 怎样工作
+## 11.8 Chunked Prefill 的进度状态
 
 设长 prompt 4096 tokens，本轮 token budget 1024。可以拆成四个 chunk：
 
@@ -169,7 +202,7 @@ sequenceDiagram
     G-->>L: first token
 ```
 
-### Chunked Prefill 需要新增状态
+### 11.8.1 分块进度与位置连续性
 
 ```text
 prompt_len
@@ -180,7 +213,7 @@ remaining_prefill_tokens
 
 下一 chunk 的 position 和 KV 写入必须从正确 offset 继续。
 
-### 代价
+### 11.8.2 分块带来的执行代价
 
 - 更多调度/launch 次数；
 - 可能降低单次 GEMM 规模；
@@ -188,9 +221,9 @@ remaining_prefill_tokens
 - TTFT 可能因被切开而增加；
 - 但 decode stall 和尾延迟可能改善。
 
-作者的 [chunked-prefills](https://zhuanlan.zhihu.com/p/710165390) 从 Orca iteration scheduling、selective batching 到 Sarathi-Serve 逐步解释这种权衡。
+[Sarathi-Serve](https://arxiv.org/abs/2403.02310)使用 chunked-prefill 将大 prefill 分解为受控大小的工作单元，以降低 prefill 对 decode 的干扰。论文中的最优 chunk size 和调度收益依赖其硬件与 workload；本章只采用分块状态和预算推导，不直接移植实验结论。
 
-## 七、Selective Batching 的概念
+## 11.9 Selective Batching 的执行边界
 
 不同请求可能在不同阶段，甚至同一 Transformer block 的算子是否适合合批也不同。
 
@@ -206,7 +239,7 @@ block tables
 sampling 参数
 ```
 
-## 八、一轮调度的简化算法
+## 11.10 教学调度策略的伪代码
 
 ```python
 budget = max_batched_tokens
@@ -232,23 +265,23 @@ release_finished()
 
 这只是教学策略。调换 prefill/decode 顺序、加入优先级、prefix hit 和公平性后会得到不同结果。
 
-## 九、Preemption
+## 11.11 KV 容量不足时的 Preemption
 
 当 running sequences 的下一步需要更多 KV，而 free blocks 不足，调度器可能抢占某些请求。
 
-### Recompute
+### 11.11.1 Recompute
 
 释放被抢占请求 KV，恢复时重新 prefill 已有 tokens。
 
 优点：不需 CPU swap 空间；缺点：重复计算，长 context 代价高。
 
-### Swap
+### 11.11.2 Swap
 
 把 KV 换到 CPU/其他层级，恢复时拷回。
 
 优点：避免重算；缺点：占 host memory 和传输带宽，状态复杂。
 
-### 选择谁被抢占
+### 11.11.3 Victim Selection
 
 可能依据：
 
@@ -263,7 +296,7 @@ SLO 风险
 
 简单“后来先抢占”便于教学，但不是普适最优。
 
-## 十、抢占必须保持状态一致
+## 11.12 Preemption 的状态一致性
 
 Recompute 策略下：
 
@@ -284,7 +317,7 @@ Swap 策略下：
 
 最危险的是释放了物理 block，却让 sequence 仍以 running 状态 decode，导致读取已被其他请求复用的 KV。
 
-## 十一、Batching Window 与模型调度不是同一层
+## 11.13 请求收集窗口与模型迭代调度
 
 HTTP batching queue 可能在第一个请求到达后等待 2 ms，收集 sampling 参数兼容的请求，再调用 engine batch API。
 
@@ -303,7 +336,7 @@ HTTP 层把 8 个请求一起交给 engine
 
 窗口太短合批不足；太长直接增加 TTFT。需要用指标而非经验口号选择。
 
-## 十二、Streaming 并发也不证明内部合批
+## 11.14 模型内部合批的可观测证据
 
 多个 SSE 连接同时打开，只说明 server 能并发维护连接。若单 model worker 逐请求串行生成，GPU 仍没有 token-level batching。
 
@@ -314,7 +347,7 @@ HTTP 层把 8 个请求一起交给 engine
 - profiler 中 batch shape；
 - scheduler trace。
 
-## 十三、公平性与 Starvation
+## 11.15 公平性与 Starvation
 
 只优先短请求可改善平均延迟，却可能让长请求永远等待；只优先 running decode 可能让新请求 TTFT 无界增长。
 
@@ -331,7 +364,7 @@ prefill 保留预算
 
 公平性不是让所有请求延迟相同，而是在定义的策略下避免某类请求无限饥饿。
 
-## 十四、Prefix Cache 如何影响调度
+## 11.16 Prefix Cache 对工作量估计的影响
 
 两个 prompt 长度相同，但一个 prefix hit 90%，另一个完全 miss。它们所需 prefill 工作不同。
 
@@ -343,7 +376,7 @@ Cache-aware scheduling 可以：
 
 但过度追求 cache locality 也可能破坏 FIFO 公平性。Week 15 再深入。
 
-## 十五、怎样评价调度策略
+## 11.17 调度策略的评价指标
 
 至少同时观察：
 
@@ -360,7 +393,7 @@ KV utilization / fragmentation
 
 例：策略 X tokens/s 提高 20%，但 p99 TTFT 从 2s 变 15s，不能简单写“性能提升 20%”。应说明适合/不适合的 SLO 和 workload。
 
-## 十六、测试 Scheduler 不应依赖真实大模型
+## 11.18 Scheduler 的确定性单元测试
 
 调度逻辑可用小 sequence metadata 测试：
 
@@ -374,33 +407,33 @@ KV utilization / fragmentation
 
 模型集成测试再验证 schedule metadata 能被 backend 正确执行。
 
-## 十八、常见误区
+## 11.19 调度概念的适用边界
 
-### Continuous batching 就是异步 HTTP
+### 11.19.1 异步 HTTP 不等同于 Continuous Batching
 
 不是。它要求模型迭代级动态重组 sequences。
 
-### Batch 越大越好
+### 11.19.2 Batch Size 不是单调优化变量
 
 更大 batch 可能提高吞吐，也会增加等待和尾延迟，并受 token/KV 预算限制。
 
-### Decode 每条只需 1 token，应永远优先
+### 11.19.3 Decode 绝对优先会造成 Prefill 饥饿
 
 这样新请求可能无法 prefill，TTFT 无限增长。
 
-### Chunk 越小越公平
+### 11.19.4 过小 Chunk 会增加调度与 Launch 开销
 
 过小 chunk 增加调度/launch 开销并降低大 GEMM 效率。
 
-### 抢占后只改队列即可
+### 11.19.5 Preemption 同时改变 KV 所有权与计算进度
 
 还必须处理 KV ownership、computed progress 和恢复方式。
 
-### Streaming 客户端同时输出就证明合批成功
+### 11.19.6 连接并发不构成模型合批证据
 
 连接并发不等于模型 batch。
 
-## 十九、学完本周，应能回答
+## 11.20 本章小结与思考题
 
 1. Fixed batching 为什么浪费短请求完成后的槽位？
 2. 一次 iteration 包含哪些步骤？
@@ -412,11 +445,12 @@ KV utilization / fragmentation
 8. 如何证明模型内部真实合批？
 9. Cache-aware scheduling 为什么可能损害公平性？
 
-## 参考与素材说明
+## 参考资料
 
-- 猛猿：[vLLM V1：Scheduler](https://zhuanlan.zhihu.com/p/1908153627639551302)
-- 猛猿：[vLLM 旧版 Scheduler 深入解析](https://zhuanlan.zhihu.com/p/692540949)
-- 猛猿：[chunked-prefills](https://zhuanlan.zhihu.com/p/710165390)
-- 课程工程：Scheduler、HTTP batching 与 Week 11 grader
+- Yu 等：[Orca: A Distributed Serving System for Transformer-Based Generative Models](https://www.usenix.org/conference/osdi22/presentation/yu)
+- Kwon 等：[Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
+- Agrawal 等：[Sarathi-Serve: Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve](https://arxiv.org/abs/2403.02310)
+- vLLM：[Scheduler Configuration](https://docs.vllm.ai/en/stable/api/vllm/config/scheduler/)
+- 课程工程：[`scheduler.py`](../../../course_vllm/engine/scheduler.py)、[`policies.py`](../../../course_vllm/engine/policies.py) 与 [`batching.py`](../../../course_vllm/server/batching.py)
 
-正文、调度算例、图示和实验均为课程原创组织。课程 scheduler 是 teaching approximation；生产系统还需处理多租户、分布式 worker、复杂抢占和长期公平性。
+课程 scheduler 是用于暴露状态与预算关系的教学实现。多租户、分布式 worker、复杂抢占和长期公平性需要额外机制，不能由本章伪代码直接推出生产结论。

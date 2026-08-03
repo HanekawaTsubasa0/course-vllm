@@ -1,6 +1,6 @@
-# Week 09：Engine 如何把一次生成组织成可靠状态机
+# 第 9 章：在线推理引擎的请求状态与资源生命周期
 
-## 模型 Backend 不应该管理整个请求
+## 9.1 模型执行与请求编排的职责分离
 
 模型 backend 最擅长回答：
 
@@ -23,11 +23,11 @@ cache release
 
 如果这些逻辑散落在 HTTP route、模型类和客户端中，单请求可能勉强运行，一旦加入 batch、streaming 和取消，状态很容易互相矛盾。
 
-Engine 的职责是把模型的一步计算组织成完整请求生命周期。它不是“更大的模型”，而是模型与服务系统之间的编排层。
+Engine 的职责是把模型的一步计算组织成完整请求生命周期。它是模型数值执行与服务协议之间的编排层。[vLLM Architecture Overview](https://docs.vllm.ai/en/latest/design/arch_overview.html)同样区分 online/offline entrypoints、LLM engine、worker、model runner 和模型本体；具体进程与类会随版本改变，本章关注这些边界所承担的稳定职责。
 
 ---
 
-## 一、先划清四个边界
+## 9.2 Protocol、Engine、Scheduler 与 Backend
 
 ```mermaid
 flowchart LR
@@ -39,19 +39,19 @@ flowchart LR
     B --> E
 ```
 
-### Protocol 层
+### 9.2.1 Protocol 层
 
 负责 JSON schema、HTTP 状态、SSE 格式、chat messages 等外部契约。它不应实现 token-by-token 模型循环。
 
-### Engine
+### 9.2.2 Engine
 
 负责编码 prompt、创建请求状态、调用 backend、sampling、检查结束、发出 token/finished event 和清理资源。
 
-### Scheduler
+### 9.2.3 Scheduler
 
 决定本轮哪些 sequence prefill/decode。Week 09 先关注单请求状态；Week 11 再展开多请求调度。
 
-### Backend
+### 9.2.4 Backend
 
 封装模型与 cache 的数值执行：
 
@@ -64,9 +64,9 @@ release_cache
 
 边界清晰后，reference backend 与 course backend 可以替换，而 Request 语义不必重写。
 
-## 二、Request 与 Sequence 为什么分开
+## 9.3 Request 与 Sequence 的状态粒度
 
-### Request
+### 9.3.1 Request
 
 表示用户提交的一次任务：
 
@@ -77,7 +77,7 @@ sampling_params
 arrival metadata
 ```
 
-### Sequence
+### 9.3.2 Sequence
 
 表示某一条候选 token 路径：
 
@@ -93,7 +93,7 @@ finish_reason
 
 当前课程一次 request 通常只有一条 sequence，但分开仍有价值：beam search、parallel sampling 或 best-of 可能让一个 request 派生多条候选 sequence；scheduler 更关心 sequence 的长度、cache 和状态，而 HTTP 更关心 request。
 
-### 不要把 Prompt Tokens 与 Generated Tokens 混成一份
+### 9.3.3 Prompt Tokens 与 Generated Tokens 的独立计数
 
 停止长度通常指生成 token 数，不是总上下文长度；输出给用户也通常只包含 generated 部分。分开存储能避免：
 
@@ -109,15 +109,15 @@ max_tokens 误把 prompt 算进去
 context = prompt_token_ids + generated_token_ids
 ```
 
-## 三、Prompt 进入 Engine 前后发生什么
+## 9.4 输入规范化与边界检查
 
-### 普通 Prompt
+### 9.4.1 普通 Prompt
 
 ```text
 string -> tokenizer.encode -> prompt_token_ids
 ```
 
-### Chat Messages
+### 9.4.2 Chat Messages
 
 ```text
 messages
@@ -128,7 +128,7 @@ messages
 
 Engine 必须明确 tokenizer/backend 边界：不同模型可能需要不同 chat template、BOS/EOS 处理和特殊 token。
 
-### 空 Prompt 与超长 Prompt
+### 9.4.3 空输入与上下文长度约束
 
 应定义：
 
@@ -139,7 +139,7 @@ Engine 必须明确 tokenizer/backend 边界：不同模型可能需要不同 ch
 
 静默截断可能改变问题语义，在线服务通常更适合明确报错或由调用者选择策略。
 
-## 四、Prefill 后为什么已经能产生第一个 Token
+## 9.5 Prefill 输出与首 Token 采样
 
 Prefill 处理整个 prompt，并返回最后位置 logits。Sampling 这份 logits 就得到第一个生成 token。
 
@@ -162,7 +162,7 @@ prefill
 
 这个顺序直接影响 `max_tokens=1`：合理行为是返回 prefill logits 采出的一个 token，然后结束；如果 prefill 后先检查 generated length，可能错误返回空结果。
 
-## 五、单请求主循环逐步展开
+## 9.6 单请求生成循环的状态转换
 
 ```mermaid
 flowchart TB
@@ -205,17 +205,17 @@ finally:
 
 真实实现可能在 finished 前仍发送最后 token，也可能 event schema 不同，但状态顺序必须自洽。
 
-## 六、Token Append 与 Stop Check 的细节
+## 9.7 Token 追加与终止条件
 
-### EOS
+### 9.7.1 EOS
 
 EOS 是模型词表中的特殊 token。是否把 EOS 文本返回给用户要由协议定义，通常它只作为结束标记，不显示。
 
-### Stop Token IDs
+### 9.7.2 Stop Token IDs
 
 用户或模型配置可以指定多个 stop token。采样到其中之一后结束。
 
-### max_tokens
+### 9.7.3 `max_tokens`
 
 通常限制 generated token 数：
 
@@ -225,11 +225,11 @@ len(generated_token_ids) >= max_tokens
 
 `max_tokens=None` 表示不按生成长度停止，但仍受 EOS、stop、上下文上限、超时和资源保护约束。生产服务不应允许完全无界请求破坏容量。
 
-### Stop String 与 Stop Token 的区别
+### 9.7.4 Stop String 与 Stop Token
 
-字符串可能跨多个 token；只检查最新 token ID 无法识别任意 stop string。课程核心协议使用 stop token IDs，若扩展字符串停止，需要维护增量解码缓冲和跨 token 匹配。
+字符串可能跨多个 token；只检查最新 token ID 无法识别任意 stop string。课程核心协议使用 stop token IDs，若扩展字符串停止，需要维护增量解码缓冲和跨 token 匹配。[Transformers `StopStringCriteria`](https://huggingface.co/docs/transformers/internal/generation_utils#transformers.StopStringCriteria)列出的跨 token “overhang”情形说明，停止字符串匹配必须基于 tokenizer 可能产生的多种分段，而不能假定一个字符串对应一个 token。
 
-### Finish Reason
+### 9.7.5 Finish Reason
 
 至少区分：
 
@@ -242,7 +242,7 @@ error      执行失败
 
 调用者需要知道回答是否被截断。
 
-## 七、Streaming Event 怎样设计
+## 9.8 Streaming 事件模型
 
 Token event：
 
@@ -262,7 +262,7 @@ Finished event：
 data: [DONE]
 ```
 
-### 增量 Decode 文本并不总是独立
+### 9.8.1 Token 边界与增量文本边界
 
 一个 token 可能是单词片段或字节片段。单独 decode 每个 token 再拼接，可能与一次 decode 完整 token 列表不同，尤其涉及空格、Unicode 和 tokenizer cleanup。
 
@@ -275,11 +275,11 @@ delta = new_full_text[len(previous_text):]
 
 代价是重复 decode；更高效实现使用 tokenizer 的增量解码能力。课程应明确当前选择和边界。
 
-### 最后一个 Token 是否发送
+### 9.8.2 终止 Token 与 Finished Event 的顺序
 
 如果 token 同时触发长度结束，它通常仍是有效生成结果，应先产生 token delta，再 finished。EOS/stop token 是否隐藏则由协议定义。顺序必须测试。
 
-## 八、Non-streaming 不是另一套生成算法
+## 9.9 Streaming 与 Non-streaming 的共享生成内核
 
 Engine 可以内部产生相同 token events：
 
@@ -296,7 +296,7 @@ flowchart LR
 
 这样停止条件和模型逻辑只有一份，减少两种接口行为不一致。
 
-## 九、取消为什么是正常路径，不是异常边角
+## 9.10 取消传播与资源回收
 
 用户关闭页面、客户端超时、上游取消请求都很常见。若服务端继续生成：
 
@@ -307,7 +307,7 @@ flowchart LR
 
 取消需要从协议层传播到 engine/scheduler，并最终 release cache。
 
-### 取消发生在不同阶段
+### 9.10.1 不同执行阶段的取消语义
 
 ```text
 waiting：从队列删除，不应分配 cache
@@ -318,7 +318,7 @@ stream write：客户端断开时触发上游取消
 
 状态转换应幂等：重复收到取消不能释放其他请求资源或发送多个 finished。
 
-## 十、异常安全与 finally
+## 9.11 异常安全与统一清理路径
 
 Cache 可能在 prefill 成功后创建，随后 sampling、detokenize 或网络发送失败。只在正常循环末尾 release 会泄漏。
 
@@ -341,7 +341,7 @@ backend decode 抛错
 
 每次都确认 cache usage 和 sequence registry 回到基线。
 
-## 十一、Batch 中每条 Sequence 必须独立结束
+## 9.12 Batch 内 Sequence 的独立终止
 
 Batch A/B/C 输出长度不同：
 
@@ -355,7 +355,7 @@ C 第 5 轮 cancelled
 
 Batch result 还要恢复原请求顺序。Scheduler 为效率可能重排、按长度分桶，但 API response 必须通过 request ID 或原始 index 对齐。
 
-## 十二、状态机应单调推进
+## 9.13 单调状态转换与非法操作
 
 一种简单状态：
 
@@ -376,7 +376,7 @@ WAITING -> PREFILL -> RUNNING -> FINISHED
 
 显式状态能让错误尽早暴露，而不是依赖多个布尔值的偶然组合。
 
-## 十三、Engine 与 Scheduler 的边界
+## 9.14 Engine 与 Scheduler 的接口边界
 
 单请求 `generate_stream` 可以自己循环；多请求 continuous batching 时，scheduler 每轮选择一组 sequences，engine 执行 batch step 并更新每条状态。
 
@@ -391,7 +391,7 @@ release finished
 
 Week 09 要把 sequence 状态做正确，Week 11 才能安全地改变选择顺序。
 
-## 十四、Profiler Baseline 应打在哪些边界
+## 9.15 请求生命周期的 Profiling 边界
 
 本周建立单请求基线：
 
@@ -408,9 +408,9 @@ release
 
 基线要固定 prompt、output tokens、dtype、backend 和 sampling，作为 Week 10/11 更换 cache/调度后的对照。
 
-## 十五、测试矩阵
+## 9.16 请求状态机测试矩阵
 
-### 正常结束
+### 9.16.1 正常终止
 
 - 第一个 token EOS；
 - 多步后 EOS；
@@ -418,54 +418,54 @@ release
 - max_tokens=1；
 - max_tokens=N。
 
-### Streaming
+### 9.16.2 Streaming
 
 - token event 顺序；
 - finished 恰好一次；
 - `[DONE]` 在 finished 后；
 - 最后 token 的 delta 正确。
 
-### 错误/取消
+### 9.16.3 错误与取消
 
 - prefill 异常；
 - decode 异常；
 - consumer 取消；
 - release 恰好且幂等。
 
-### Batch
+### 9.16.4 Batch
 
 - 不同结束轮次；
 - 输出恢复输入顺序；
 - A 结束不影响 B；
 - 每条 finish_reason 正确。
 
-## 十七、常见误区
+## 9.17 请求语义的常见混淆
 
-### Prefill 后必须 decode 一次才有首 token
+### 9.17.1 Prefill 已经产生首 Token 所需 Logits
 
 Prefill 最后位置 logits 已能采样首 token。
 
-### Streaming 与 non-streaming 应写两套循环
+### 9.17.2 返回方式不应复制生成循环
 
 共享 event 生成逻辑更容易保持语义一致。
 
-### max_tokens 应限制总上下文
+### 9.17.3 生成上限与上下文上限
 
 API 中通常指生成 token 数；模型上下文上限是另一约束。
 
-### 客户端断开后 GPU 会自动停止
+### 9.17.4 客户端断开不会自动停止模型执行
 
 不会。取消必须传播到 engine/scheduler。
 
-### Python generator 退出后 cache 一定释放
+### 9.17.5 Generator 退出不构成 Cache 释放协议
 
 只有资源 owner 在 finally 或统一生命周期中明确 release 才可靠。
 
-### Batch 结束条件可以统一
+### 9.17.6 Batch 不共享单一终止条件
 
 每条 sequence 都有独立 EOS、长度和取消状态。
 
-## 十八、学完本周，应能回答
+## 9.18 本章小结与思考题
 
 1. Protocol、Engine、Scheduler、Backend 各负责什么？
 2. Request 与 Sequence 为什么分开？
@@ -477,11 +477,10 @@ API 中通常指生成 token 数；模型上下文上限是另一约束。
 8. Batch 重排后怎样恢复原请求顺序？
 9. 哪些测试能证明状态机没有泄漏？
 
-## 参考与素材说明
+## 参考资料
 
-- 猛猿：[vLLM V1：整体流程](https://zhuanlan.zhihu.com/p/1900126076279160869)
-- 猛猿：[vLLM 旧版整体架构](https://zhuanlan.zhihu.com/p/691045737)
-- 猛猿：[vLLM V1：使用 AsyncLLM 做异步推理](https://zhuanlan.zhihu.com/p/1916187125931554299)
-- 课程工程：Engine、Request/Sequence、protocol 与 Week 09 grader
-
-本文状态机、事件示例、异常路径和实验均为课程原创组织。参考文章用于建立 vLLM offline/online 共用推理内核的系统视角，具体类名以课程指定实现为准。
+- vLLM：[Architecture Overview](https://docs.vllm.ai/en/latest/design/arch_overview.html)
+- vLLM：[Engine API](https://docs.vllm.ai/en/latest/api/vllm/index.html)
+- Hugging Face Transformers：[Stopping Criteria](https://huggingface.co/docs/transformers/internal/generation_utils#transformers.StoppingCriteria)
+- Yu 等：[Orca: A Distributed Serving System for Transformer-Based Generative Models](https://www.usenix.org/conference/osdi22/presentation/yu)
+- 课程工程：[`engine.py`](../../../course_vllm/engine/engine.py)、[`request.py`](../../../course_vllm/engine/request.py)、[`protocol.py`](../../../course_vllm/server/protocol.py) 与 [`api.py`](../../../course_vllm/server/api.py)
