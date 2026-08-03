@@ -25,7 +25,7 @@
 
 ### 第三篇：KV 状态与推理引擎
 
-- [第 8 章：KV Cache 是怎样工作的](part3_serving_engine/week08_kv_cache.md)
+- [第 8 章：自回归推理中的 KV Cache](part3_serving_engine/week08_kv_cache.md)（来源驱动样章）
 - [第 9 章：一个请求如何穿过推理引擎](part3_serving_engine/week09_engine_request_lifecycle.md)
 - [第 10 章：Paged KV Cache 的地址映射与内存管理](part3_serving_engine/week10_paged_kv_block_manager.md)（来源驱动样章）
 - [第 11 章：Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
