@@ -1,6 +1,6 @@
-# Week 04：RMSNorm 与 RoPE，稳定数值并让 Attention 看见位置
+# 第 4 章：RMSNorm 与 RoPE 的数学定义及 GPU 映射
 
-## 两个算子分别解决什么
+## 4.1 归一化与位置编码的不同职责
 
 Transformer 接收的是 token 向量。经过多层 attention、MLP 和残差相加后，向量的数值尺度可能不断变化；如果尺度失控，训练和推理中的浮点计算都会变得困难。RMSNorm 负责把每个 token 的 hidden vector 拉回稳定尺度。
 
@@ -21,7 +21,7 @@ flowchart LR
 
 ---
 
-## 一、为什么深层网络需要归一化
+## 4.2 Hidden Dimension 上的归一化
 
 一个 Transformer block 不断执行：
 
@@ -41,7 +41,7 @@ residual add
 
 归一化不会替模型学习内容，而是给后续计算提供相对稳定的数值尺度。
 
-### 按哪个维度归一化
+### 4.2.1 归一化轴与独立样本
 
 对 hidden states：
 
@@ -53,9 +53,9 @@ RMSNorm 通常对最后一个 `hidden_size` 维度独立处理。也就是说，
 
 如果 shape 为 `[2, 4, 1024]`，一共有 `2*4=8` 行 hidden vector，每行 1024 个元素分别做一次 RMSNorm。它不会跨 token 求均值，也不会把两个 batch 样本混在一起。
 
-## 二、从 LayerNorm 到 RMSNorm
+## 4.3 LayerNorm 与 RMSNorm 的统计量
 
-### LayerNorm
+### 4.3.1 LayerNorm
 
 对一行向量 `x`，LayerNorm 计算：
 
@@ -67,7 +67,7 @@ y_j  = (x_j - mean) / sqrt(var + eps) * gamma_j + beta_j
 
 它做两件事：移除均值，控制方差。
 
-### RMSNorm
+### 4.3.2 RMSNorm
 
 RMSNorm 不做中心化，只控制均方根尺度：
 
@@ -79,7 +79,9 @@ y_j         = (x_j / rms) * weight_j
 
 `weight` 是可学习的逐维缩放参数。归一化把整体尺度稳定下来，weight 再允许模型为不同 hidden 维学习不同幅度。
 
-### 一个四维例子
+[RMSNorm 原论文](https://arxiv.org/abs/1910.07467)将 re-centering invariance 与 re-scaling invariance 区分开来，并通过移除均值统计量构造 RMSNorm。这里的简化不是把 LayerNorm 的方差公式机械删除一项，而是选择只保留均方根尺度归一化；课程实现必须与模型权重所采用的结构一致。
+
+### 4.3.3 四维向量数值算例
 
 设：
 
@@ -99,9 +101,9 @@ y ≈ [0.632, -0.632, 1.265, -1.265]
 
 输出仍保留正负关系和方向，只是整体尺度被调整。RMSNorm 不是把每个元素限制在某个区间，也不是让向量元素和为 0。
 
-## 三、Epsilon 与低精度累加
+## 4.4 Epsilon 与低精度累加
 
-### Epsilon 为什么存在
+### 4.4.1 Epsilon 的数值作用
 
 如果输入全为 0：
 
@@ -117,7 +119,7 @@ rsqrt(mean_square + eps)
 
 Epsilon 还会影响极小输入下的数值行为，因此应使用模型配置中的值，而不是 kernel 随意选择。
 
-### 为什么 bf16/fp16 输入常用 fp32 累加
+### 4.4.2 BF16/FP16 输入与 FP32 累加
 
 平方和包含很多元素。若每一步都用低精度累加，舍入误差会不断积累，数值较大时还可能溢出。
 
@@ -134,7 +136,7 @@ Epsilon 还会影响极小输入下的数值行为，因此应使用模型配置
 
 这不意味着整个模型都变成 fp32，只是让敏感的归约过程使用更稳健的累加精度。
 
-## 四、RMSNorm 怎样映射到 CUDA
+## 4.5 RMSNorm 的 CUDA 并行归约
 
 输入展平为：
 
@@ -154,7 +156,7 @@ flowchart TB
     F --> O["各线程写出 x * factor * weight"]
 ```
 
-### 第一步：局部累加
+### 4.5.1 线程局部平方和
 
 如果 hidden size 为 4096，block 有 256 个线程，每个线程可以按 stride 处理：
 
@@ -165,19 +167,19 @@ for (int j = threadIdx.x; j < hidden; j += blockDim.x) {
 }
 ```
 
-### 第二步：Block 内 Reduction
+### 4.5.2 Block 内 Reduction
 
 256 个线程各有一个 `local`，必须合并为整行平方和。可以使用 shared memory tree reduction，也可以先做 warp-level shuffle，再合并各 warp 结果。
 
-### 第三步：广播缩放因子
+### 4.5.3 缩放因子的广播与写回
 
 线程 0 或第一个 warp 得到 `factor` 后，block 内所有线程需要使用它处理各自元素。这里必须保证归约完成后再读取结果。
 
-### 为什么一个线程计算一整行通常不好
+### 4.5.4 单线程处理整行的并行度限制
 
 实现最简单，但 4096 个元素会被单线程串行处理，无法利用并行带宽。RMSNorm 的关键不是公式复杂，而是如何高效协作完成一行 reduction。
 
-## 五、位置为什么不能只靠 token 内容
+## 4.6 Attention 中的位置信息
 
 考虑两句话：
 
@@ -196,7 +198,7 @@ input = token_embedding + position_embedding
 
 RoPE 采用不同思路：不直接给 hidden state 加位置向量，而是在 Attention 打分前，对 Q 和 K 施加位置相关旋转。
 
-## 六、先理解二维旋转
+## 4.7 二维旋转与多频率分组
 
 二维向量 `[x1, x2]` 旋转角度 `theta`：
 
@@ -214,11 +216,11 @@ x2' = x1*sin(theta) + x2*cos(theta)
 
 旋转不会改变二维向量长度，只改变方向。RoPE 把 head dimension 分成许多二维子空间，每对子维度使用不同频率，并让旋转角随 position 增长。
 
-### 多频率的意义
+### 4.7.1 不同维度对的旋转频率
 
 不同维度对位置变化的速度不同：有些维度旋转快，敏感于近距离差异；有些旋转慢，可以表达更长范围的位置变化。它和经典 sinusoidal position encoding 一样使用多尺度频率，但注入位置的方式不同。
 
-## 七、RoPE 为什么能表达相对位置
+## 4.8 RoPE 点积中的相对位置项
 
 设位置 `m` 的 query 旋转 `m*theta`，位置 `n` 的 key 旋转 `n*theta`。旋转后的点积具有这样的结构：
 
@@ -229,7 +231,7 @@ x2' = x1*sin(theta) + x2*cos(theta)
 
 也就是说，Attention score 中出现的是位置差 `n-m`，而不只是两个绝对位置。模型因此能自然感知相对距离。
 
-这里最重要的不是背完整复数推导，而是理解：
+这一恒等式来自二维旋转矩阵的正交性质 $R(m)^\mathsf{T}R(n)=R(n-m)$。因此可以按以下顺序理解位置项的来源：
 
 ```text
 分别按绝对位置旋转 Q/K
@@ -237,9 +239,9 @@ x2' = x1*sin(theta) + x2*cos(theta)
 -> 结果依赖相对位置差
 ```
 
-作者的 [RoPE 直觉解释](https://zhuanlan.zhihu.com/p/863378538) 也围绕“避开复杂形式，先抓住旋转和相对位置”展开。
+[RoFormer 论文](https://arxiv.org/abs/2104.09864)给出了 RoPE 的完整定义及其在 self-attention 中引入相对位置信息的推导。上述二维形式是对论文旋转操作的实数表示，不改变其数学语义。
 
-## 八、为什么 RoPE 作用于 Q/K，不作用于 V
+## 4.9 RoPE 在 Q/K 投影之后的作用位置
 
 Attention：
 
@@ -253,7 +255,7 @@ Q/K 决定“当前位置应该看哪些历史位置”，位置关系需要影�
 
 这不是说 V 永远不能包含位置信息，而是 RoPE 的核心机制通过改变 QK 点积注入相对位置。
 
-## 九、Tensor Shape 与配对方式
+## 4.10 Tensor Shape 与维度配对
 
 常见 Q/K shape：
 
@@ -264,7 +266,7 @@ K: [batch, num_kv_heads, seq_len, head_dim]
 
 GQA 模型中 Q head 数与 KV head 数可能不同，但每个 head 内的 RoPE 仍沿 `head_dim` 配对。
 
-### 两种常见布局
+### 4.10.1 常见 Q/K 布局
 
 二维配对可能按相邻偶奇维：
 
@@ -280,7 +282,7 @@ GQA 模型中 Q head 数与 KV head 数可能不同，但每个 head 内的 RoPE
 
 两种写法不能混用。Kernel 必须与模型 reference 的 `rotate_half` 定义一致，否则 shape 看起来正确，数值却完全不同。
 
-### Cos/Sin Shape
+### 4.10.2 Cos/Sin 的广播 Shape
 
 Cos/sin 通常由 position ids 查表得到，再 broadcast 到 head 维。常见逻辑形状类似：
 
@@ -290,7 +292,7 @@ Cos/sin 通常由 position ids 查表得到，再 broadcast 到 head 维。常�
 
 其中 head 维共享同一位置频率表。实现时不能只凭“能 broadcast”就认为语义正确，还要确认 seq 和 head_dim 对齐。
 
-## 十、RoPE 怎样映射到 CUDA
+## 4.11 RoPE 的 CUDA 元素映射
 
 RoPE 不需要跨整行求和。每个输出只依赖本维元素、配对元素、cos 和 sin：
 
@@ -322,9 +324,9 @@ flowchart LR
 - cos/sin broadcast 是否正确；
 - head_dim 是否满足偶数等约束。
 
-## 十一、正确性与误差怎样验证
+## 4.12 正确性与数值误差验证
 
-### RMSNorm
+### 4.12.1 RMSNorm
 
 至少比较：
 
@@ -337,7 +339,7 @@ float32 / float16 / bfloat16
 
 归约顺序不同会导致低位误差。不能为了让错误实现通过而随意放宽容差；应先判断误差是否随 hidden size、dtype 或数值范围异常增长。
 
-### RoPE
+### 4.12.2 RoPE
 
 至少覆盖：
 
@@ -351,7 +353,7 @@ Q 与 K
 
 位置 0 往往对应旋转角 0，可作为简单 sanity check；但只测 position 0 无法发现位置索引错误。
 
-## 十二、主路径 Dispatch
+## 4.13 模型主路径中的 Dispatch
 
 单独的 kernel test 通过后，还要证明模型 forward 真的调用它：
 
@@ -366,29 +368,29 @@ offline_generate
 
 `auto` 模式允许失败后回退，适合普通运行；严格验收需要 `cuda` 模式或 profiler kernel 证据。否则“输出正确”可能只是 reference 路径正确。
 
-## 十四、常见误区
+## 4.14 数学语义与实现边界
 
-### RMSNorm 是把向量限制到 [-1,1]
+### 4.14.1 RMSNorm 不限定输出值域
 
 不是。它控制均方根尺度，元素仍可超过 1，之后还有可学习 weight。
 
-### RMSNorm 应跨 batch 求统计量
+### 4.14.2 RMSNorm 不跨 Batch 聚合统计量
 
 不是。它对每个 token 的 hidden 维独立归一化。
 
-### RoPE 给 V 也旋转会更完整
+### 4.14.3 标准 RoPE 不旋转 Value
 
 标准 RoPE 通过 QK 匹配注入位置。随意旋转 V 会改变被汇总的内容语义。
 
-### 能 broadcast 就说明 cos/sin shape 正确
+### 4.14.4 可广播不等同于维度语义正确
 
 Broadcast 只保证运算能执行，不保证 position、seq 和 dim 的语义对齐。
 
-### fp16 输入就必须 fp16 累加
+### 4.14.5 输入 Dtype 不决定累加 Dtype
 
 许多归约会使用 fp32 累加提高稳定性，再转换回输出 dtype。
 
-## 十五、学完本周，应能回答
+## 4.15 本章小结与思考题
 
 1. RMSNorm 与 LayerNorm 在公式上差在哪里？
 2. RMSNorm 为什么沿 hidden dimension 归约？
@@ -399,10 +401,12 @@ Broadcast 只保证运算能执行，不保证 position、seq 和 dim 的语义�
 7. 为什么不缓存 Q，也不对 V 应用标准 RoPE？
 8. RoPE 最容易出现哪些 shape 和配对错误？
 
-## 参考与素材说明
+## 参考资料
 
-- 猛猿：[避开复数推导，我们还可以怎么理解 RoPE？](https://zhuanlan.zhihu.com/p/863378538)
-- 猛猿：[为什么 Transformer 要用 LayerNorm](https://zhuanlan.zhihu.com/p/456863215)
-- 课程工程：Qwen3 RMSNorm、RoPE reference 与 CUDA wrappers
+- Zhang 与 Sennrich：[Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
+- Su 等：[RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864)
+- PyTorch：[Numerical Accuracy](https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html)
+- NVIDIA：[CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
+- 课程工程：[`Qwen3RMSNorm`](../../../course_vllm/model/qwen3_torch.py#L57)、[`apply_rotary_pos_emb`](../../../course_vllm/model/qwen3_torch.py#L87) 与 [`course_ops.cu`](../../../kernels/course_ops.cu)
 
 正文、数值例子和图示均为课程重新组织。引用文章用于补充直觉与背景；具体配对布局、dtype 和 shape 以课程模型 reference 为准。

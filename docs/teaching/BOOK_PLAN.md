@@ -15,10 +15,10 @@
 | 一 | 1 | Serving 流程与指标 | 来源驱动初稿 | 追踪一个请求从文本到流式 token 的完整时间线 |
 | 一 | 2 | Profiling 与 Roofline | 来源驱动初稿 | 从“接口变慢”逐层找到一个可验证瓶颈 |
 | 二 | 3 | CUDA Extension | 来源驱动初稿 | Tensor 怎样经过四层边界到达 kernel |
-| 二 | 4 | RMSNorm 与 RoPE | 待重写 | 两个公式怎样变成归约、配对旋转与融合机会 |
-| 二 | 5 | GEMM 与 Linear | 待重写 | 从重复 HBM 读取推进到 tile 与数据复用 |
-| 二 | 6 | Softmax 与 Sampling | 待重写 | 从 logits 到下一个 token 的数值与系统流水线 |
-| 二 | 7 | Attention | 待重写 | 为什么消除中间读写比少做几次乘法更关键 |
+| 二 | 4 | RMSNorm 与 RoPE | 来源驱动初稿 | 两个公式怎样变成归约、配对旋转与融合机会 |
+| 二 | 5 | GEMM 与 Linear | 来源驱动初稿 | 从重复 HBM 读取推进到 tile 与数据复用 |
+| 二 | 6 | Softmax 与 Sampling | 来源驱动初稿 | 从 logits 到下一个 token 的数值与系统流水线 |
+| 二 | 7 | Attention | 来源驱动初稿 | 为什么消除中间读写比少做几次乘法更关键 |
 | 三 | 8 | KV Cache | 来源驱动初稿 | 从因果注意力推导缓存语义、状态增长与容量 |
 | 三 | 9 | Request Lifecycle | 来源驱动初稿 | 一个请求如何在控制面与数据面之间流动 |
 | 三 | 10 | Paged KV | 来源驱动初稿 | 逻辑 KV 怎样映射、共享和释放物理块 |

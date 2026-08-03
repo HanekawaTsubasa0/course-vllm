@@ -1,6 +1,6 @@
-# Week 05：Matmul 为什么是 LLM 的计算主干
+# 第 5 章：GEMM 的数据复用与 Linear 算子实现
 
-## 从一个 Token 经过 Transformer 层说起
+## 5.1 Transformer 层中的 Linear 投影
 
 一个 token 的 hidden vector 进入 Transformer 层后，会反复经过线性变换：
 
@@ -14,7 +14,7 @@ MLP 中还有 gate / up / down projections
 
 RMSNorm 和 RoPE 很重要，但它们的计算量通常不是层内主体。大规模 Linear，也就是 GEMM，消耗了 Transformer 大量 FLOPs。
 
-Week 05 要回答三个逐渐深入的问题：
+本章沿三个依赖关系逐步展开：
 
 1. Linear 如何变成矩阵乘？
 2. 每个线程计算一个输出元素，为什么正确却很慢？
@@ -24,7 +24,7 @@ Week 05 要回答三个逐渐深入的问题：
 
 ---
 
-## 一、Linear 的 Shape 先别弄错
+## 5.2 Linear 与 GEMM 的 Shape 对应
 
 PyTorch Linear 的数学形式：
 
@@ -71,7 +71,7 @@ N = out_features
 A[M,K] @ B[K,N] = C[M,N]
 ```
 
-### Weight Layout 为什么容易错
+### 5.2.1 PyTorch Weight Layout 与矩阵乘方向
 
 模型保存的是 `weight[out,in]`。实现可以：
 
@@ -83,7 +83,7 @@ A[M,K] @ B[K,N] = C[M,N]
 
 因此测试必须包含 `K != N`。
 
-## 二、矩阵乘究竟做了多少工作
+## 5.3 GEMM 的运算量与数据量
 
 矩阵乘：
 
@@ -113,7 +113,7 @@ M=128, K=1024, N=3072
 
 一个模型层有多次 projection，模型又有多层，decode 还会重复许多轮。GEMM kernel 的效率因此会被不断放大。
 
-## 三、Naive Matmul：每个线程负责一个 C 元素
+## 5.4 每线程计算一个输出元素的 Naive Kernel
 
 最直观映射是二维 grid：
 
@@ -140,7 +140,7 @@ flowchart LR
     S --> C["写 C[row,col]"]
 ```
 
-### 二维索引
+### 5.4.1 二维 Grid 与输出坐标
 
 常见写法：
 
@@ -157,7 +157,7 @@ if (row < M && col < N) { ... }
 
 数学上没有问题。性能问题来自同一数据被许多线程反复从 global memory 读取。
 
-## 四、Naive 实现浪费在哪里
+## 5.5 Naive Kernel 的重复全局内存读取
 
 考虑同一行输出：
 
@@ -178,7 +178,9 @@ B 的一个元素被同一输出 tile 的多个行复用
 
 Naive kernel 可能依赖硬件 cache 获得部分复用，却没有显式组织它。Tiled matmul 的核心就是让复用关系变得明确。
 
-## 五、Tiling：一次搬一小块，反复使用
+## 5.6 Shared-Memory Tiling 与片上复用
+
+[CUTLASS 的 Efficient GEMM 文档](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html)把 GEMM 实现组织为 thread block、warp 和 thread 多级 tile，并通过 shared memory 与寄存器在存储层次间复用数据。本节只实现其中最外层的 thread-block tiling，用来验证数据复用、同步和边界处理。
 
 假设 tile size 为 `T`。一个 thread block 负责输出 C 的一个 `T x T` tile。
 
@@ -203,7 +205,7 @@ flowchart TB
     N -- "否" --> O["写回 C tile"]
 ```
 
-### 一个 4x4 小例子
+### 5.6.1 4x4 矩阵的 2x2 Tile 算例
 
 设 A、B 都是 `4x4`，tile size 为 2。计算 C 左上角 `2x2` tile：
 
@@ -227,7 +229,7 @@ B rows 2..3, cols 0..1
 
 每个 A tile 元素被 tile 内不同输出列复用，每个 B tile 元素被不同输出行复用。
 
-## 六、Tiling 到底减少了多少 Global Load
+## 5.7 Tiling 的全局内存读取量
 
 简化地看，一个 `T x T` 输出 tile 在一轮 K tile 中需要：
 
@@ -252,7 +254,7 @@ T*T*T 次乘加相关工作
 - occupancy；
 - 数据类型和目标架构。
 
-## 七、为什么需要两次同步
+## 5.8 Tile 载入与复用之间的同步
 
 协作加载时，不同线程负责不同元素。某线程加载完自己的 A 元素，不代表其他线程已经加载完 B。计算前必须：
 
@@ -272,7 +274,7 @@ load tile
 
 如果 block 内存在某些线程提前 return，而其余线程执行 `__syncthreads()`，可能造成未定义行为或死锁。边界线程通常不直接退出，而是为越界加载写 0，并继续参与同步。
 
-## 八、边界 Tile 怎样处理
+## 5.9 非整除矩阵维度的边界 Tile
 
 M、N、K 不一定能被 T 整除。例如 `M=1000, T=32`，最后一个 tile 只有部分有效行。
 
@@ -299,7 +301,7 @@ M=1, N=17, K=5
 M=65, N=63, K=67
 ```
 
-## 九、访存合并与 Layout
+## 5.10 合并访存与矩阵 Layout
 
 Tiling 只有在加载方式合理时才有效。让 thread `tx` 读取连续的 A/B 元素，通常有利于 coalescing。
 
@@ -314,13 +316,13 @@ Tiling 只有在加载方式合理时才有效。让 thread `tx` 读取连续的
 
 不能为了让 matmul kernel 更快，每次 forward 前都创建一个昂贵的 contiguous transpose，而不把这段时间算进端到端测试。
 
-## 十、Shared Memory 也不是免费午餐
+## 5.11 Shared Memory、寄存器与 Occupancy
 
 Shared memory 容量有限，同一个 SM 上驻留的 block 会竞争它。Tile 增大可能提高复用，却减少并发驻留 block。
 
 Shared memory 还被划分为多个 bank。同一 warp 的多个线程如果以冲突模式访问同一 bank，访问可能串行化。基础课程不要求完成复杂 bank-conflict 优化，但要知道“用了 shared memory”不等于访问一定高效。
 
-## 十一、数值精度与累加顺序
+## 5.12 累加精度与浮点执行顺序
 
 矩阵乘是长 reduction。不同实现可能以不同顺序累加：
 
@@ -338,7 +340,7 @@ Shared memory 还被划分为多个 bank。同一 warp 的多个线程如果以�
 
 误差容差必须结合 K、dtype 和数值范围设定，不能看到测试失败就不断放宽。
 
-## 十二、Tensor Core、cuBLAS 与教学 Kernel
+## 5.13 Tensor Core、cuBLAS 与教学 Kernel 的边界
 
 现代高性能 GEMM 远不止 shared-memory tile：
 
@@ -362,9 +364,9 @@ cuBLAS、CUTLASS 和 PyTorch 已经包含大量架构专项优化。课程 naive
 
 除非在非常特定 shape 上做了专门优化，教学 kernel 不应宣称普遍超过成熟库。
 
-作者的 [CUDA GEMM 优化](https://zhuanlan.zhihu.com/p/703256080) 展示了从基础实现逐步寻找数据复用的思路。课程采用相同的能力递进，但把交付范围限制在 naive 与基础 tiled，避免在尚未理解同步和边界时直接堆高级技巧。
+成熟 GEMM 还会使用 warp-level tile、寄存器 blocking、流水化拷贝和 Tensor Core 指令。[CUTLASS GEMM API](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html)明确区分 device、threadblock、warp 和 instruction 层级。课程将实现范围限制在 naive 与基础 tiled；该限制用于隔离核心机制，不表示高级层级对生产性能不重要。
 
-## 十三、Linear 接入模型主路径
+## 5.14 Linear 在模型主路径中的 Dispatch
 
 自定义 matmul 单测通过后，`CourseLinear` 需要处理：
 
@@ -395,7 +397,7 @@ flowchart LR
 4. `kernel_impl=cuda` 强制 dispatch；
 5. 短生成中 profiler 能看到 kernel。
 
-## 十四、怎样比较 Naive、Tiled 与 PyTorch
+## 5.15 Naive、Tiled 与 PyTorch 基线的比较方法
 
 公平比较必须：
 
@@ -417,33 +419,33 @@ flowchart LR
 
 同一个 kernel 在大矩阵上表现不错，不代表 decode 的小 M 场景也合适。
 
-## 十六、常见误区
+## 5.16 GEMM 优化结论的适用边界
 
-### Tiled 数学公式与 naive 不同
+### 5.16.1 Tiled 与 Naive 实现相同数学运算
 
 没有。两者都计算同一个 dot product；区别是数据怎样搬运和复用。
 
-### Tile 越大越好
+### 5.16.2 Tile Size 受资源约束
 
 更大 tile 增加复用，也消耗更多线程、shared memory 和 registers，可能降低 occupancy。
 
-### 方阵测试通过就说明 layout 正确
+### 5.16.3 方阵测试不能覆盖 Layout 错误
 
 方阵会掩盖 K/N 互换。必须测试非方阵 Linear。
 
-### 结果必须逐 bit 等于 PyTorch
+### 5.16.4 浮点结果不要求逐 Bit 相同
 
 不同累加顺序和 dtype 会带来合理浮点误差。应使用有依据的容差。
 
-### Kernel 快就代表 Linear 快
+### 5.16.5 Kernel 时间不等同于模型收益
 
 如果接口每次产生 transpose copy 或 reshape copy，端到端可能更慢。
 
-### 教学 Tiled 应超过 cuBLAS
+### 5.16.6 教学 Kernel 不以超过 cuBLAS 为目标
 
 成熟库使用 Tensor Core、架构专项 tiling 和 shape dispatch。课程目标是理解基本机制和证据。
 
-## 十七、学完本周，应能回答
+## 5.17 本章小结与思考题
 
 1. PyTorch Linear 的 weight 为什么是 `[out,in]`？
 2. `2MNK` FLOPs 从哪里来？
@@ -454,10 +456,12 @@ flowchart LR
 7. Tile size 如何同时影响复用和 occupancy？
 8. 为什么 kernel microbenchmark 与模型端到端结果可能不同？
 
-## 参考与素材说明
+## 参考资料
 
-- 猛猿：[从啥也不会到 CUDA GEMM 优化](https://zhuanlan.zhihu.com/p/703256080)
-- 猛猿：[FlashAttention V2：从原理到并行计算](https://zhuanlan.zhihu.com/p/691067658)
-- 课程工程：CourseLinear、naive/tiled matmul 与 Week 05 grader
+- NVIDIA CUTLASS：[Efficient GEMM in CUDA](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html)
+- NVIDIA CUTLASS：[GEMM API](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html)
+- NVIDIA：[CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
+- PyTorch：[`torch.nn.Linear`](https://docs.pytorch.org/docs/stable/generated/torch.nn.Linear.html)
+- 课程工程：[`CourseLinear`](../../../course_vllm/model/ops.py)、[`course_ops.cpp`](../../../kernels/course_ops.cpp) 与 [`course_ops.cu`](../../../kernels/course_ops.cu)
 
-本文借鉴参考文章逐层增加优化复杂度的教学方法。正文、计算例子和图示均为课程原创；工业 GEMM 的高级实现只用于建立边界，不作为本周代码交付要求。
+工业 GEMM 的高级实现用于界定教学 kernel 与生产库的差距，不属于本章课程实现的功能范围。

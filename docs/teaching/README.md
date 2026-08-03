@@ -16,10 +16,10 @@
 ### 第二篇：GPU 编程与核心算子
 
 - [第 3 章：PyTorch CUDA Extension 的执行模型](part2_gpu_kernels/week03_cuda_extension.md)（来源驱动样章）
-- [第 4 章：RMSNorm 与 RoPE](part2_gpu_kernels/week04_rmsnorm_rope.md)
-- [第 5 章：矩阵乘与 Linear](part2_gpu_kernels/week05_matmul_linear.md)
-- [第 6 章：Softmax、Sampling 与生成策略](part2_gpu_kernels/week06_softmax_sampling.md)
-- [第 7 章：Attention 为什么难以高效实现](part2_gpu_kernels/week07_attention.md)
+- [第 4 章：RMSNorm 与 RoPE 的数学定义及 GPU 映射](part2_gpu_kernels/week04_rmsnorm_rope.md)
+- [第 5 章：GEMM 的数据复用与 Linear 算子实现](part2_gpu_kernels/week05_matmul_linear.md)
+- [第 6 章：从 Logits 到 Token 的 Softmax 与 Sampling](part2_gpu_kernels/week06_softmax_sampling.md)
+- [第 7 章：Attention 的张量语义与 IO-Aware 实现](part2_gpu_kernels/week07_attention.md)
 
 这一篇从最小 CUDA 闭环出发，逐步进入归约、数据复用、矩阵乘、概率计算和 Attention。重点不是背 API，而是把数学、张量布局、线程工作和硬件瓶颈对应起来。
 

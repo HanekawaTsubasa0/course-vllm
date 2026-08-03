@@ -70,7 +70,7 @@ PyTorch 的 `torch.utils.cpp_extension` 可以将 C++ 与 CUDA 源文件编译�
 
 若非连续 tensor 被当作连续数组读取，底层地址仍可能合法，但线性下标不再对应预期元素。实现通常选择拒绝非连续输入，或先调用 `.contiguous()` 生成符合 kernel 布局约定的 tensor。课程的通用包装层采用后一种方式，见 [course_vllm/kernels/cuda_ops.py](../../../course_vllm/kernels/cuda_ops.py)。
 
-### 不同接口层的约束
+### 3.2.1 不同接口层的约束
 
 检查应放在最了解约束的边界：
 
@@ -101,7 +101,7 @@ idx = blockIdx.x * blockDim.x + threadIdx.x
 
 `threadIdx.x` 是线程在当前 block 中的位置，`blockIdx.x` 是 block 在 grid 中的位置，`blockDim.x` 是每个 block 的线程数。
 
-### 索引实例：n = 1000
+### 3.3.1 索引实例：`n=1000`
 
 设 `blockDim.x = 256`。需要的 block 数是：
 
@@ -161,7 +161,7 @@ AI ≈ 1 FLOP / 12 bytes ≈ 0.083 FLOP/byte
 
 该算术强度很低，kernel 更可能受到显存带宽而非浮点吞吐限制。由于每个输入元素只被使用一次，将其先复制到 shared memory 不会增加数据复用，反而增加搬运和同步开销。
 
-### 合并访问
+### 3.5.1 合并访问
 
 当一个 warp 访问 `a[idx]` 时，线程 0、1、2……请求连续地址。硬件可以把这些访问合并成较少的内存事务，这称为 coalesced access。
 
@@ -311,13 +311,13 @@ Tensor 元数据
 
 分析复杂 kernel 时，可先将其还原到这条调用链，再判断新增复杂性位于哪一层。
 
-## 章末小结
+## 3.11 本章小结
 
 CUDA extension 是一条跨越对象模型、编译边界、运行时队列和并行硬件的调用链。向量加法排除了复杂数学的干扰，使这条调用链能够被逐层验证。
 
 理解 CUDA extension 需要保持三个层次上的区分。tensor 对象保存的是数据解释方式和存储引用，并不等同于底层数据地址；thread 是 CUDA 暴露的编程抽象，而 warp 是分析实际执行行为与性能的重要单位；数值结果正确、CUDA 路径确已执行和性能测量可信，则分别对应不同的验证证据，不能相互替代。
 
-## 思考题
+## 3.12 思考题
 
 1. 对 `n=4097`、`blockDim.x=256`，需要多少 block？最后一个 block 有多少有效线程？
 2. 如果删掉 `idx < n`，为什么程序可能不是每次都立刻报错？
@@ -328,7 +328,7 @@ CUDA extension 是一条跨越对象模型、编译边界、运行时队列和�
 7. 如果 512 threads/block 比 256 慢，至少可以从哪些硬件资源角度提出假设？
 8. 把本章四层调用链映射到 RMSNorm：每一层需要新增什么约束？
 
-## 参考资料
+## 3.13 参考资料
 
 - [NVIDIA CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html)：执行层次、内存层次和异步模型。
 - [NVIDIA CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)：访存合并、计时与性能分析方法。

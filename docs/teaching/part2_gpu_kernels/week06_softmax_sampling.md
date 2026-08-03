@@ -1,6 +1,6 @@
-# Week 06：Logits 怎样变成下一个 Token
+# 第 6 章：从 Logits 到 Token 的 Softmax 与 Sampling
 
-## 模型算完了，回答还没有产生
+## 6.1 模型输出与生成策略的接口
 
 Transformer 最后一层输出 hidden state，再经过 LM head 得到词表上的 logits。假设词表有 150,000 个 token，那么每个正在生成的 sequence 都会得到一个 150,000 维向量。
 
@@ -16,9 +16,11 @@ Transformer 最后一层输出 hidden state，再经过 LM head 得到词表上�
 
 一个请求每生成一个 token 都会经过这条路径。Sampling 的耗时通常小于大规模 Linear，但它决定生成语义，也可能影响请求能否合批，因此不能当作无关的后处理。
 
+[Transformers generation strategies](https://huggingface.co/docs/transformers/main/en/generation_strategies)区分 greedy decoding、multinomial sampling、beam search 和 speculative decoding 等策略。本章只讨论课程 sampler 实际支持的 greedy、temperature 与 top-k 路径；未实现的策略不能仅凭参数名称推断行为。
+
 ---
 
-## 一、Logit 为什么不是概率
+## 6.2 Logits 与离散概率分布
 
 模型输出：
 
@@ -49,9 +51,11 @@ p_i >= 0
 sum_i p_i = 1
 ```
 
+[PyTorch `softmax` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.softmax.html)将运算定义在指定维度上。对 serving sampler，归一化维通常是 vocabulary dimension；若错误地跨 batch 或 sequence 归一化，不同请求的概率会相互影响。
+
 指数函数会放大 logit 差异。A 比 B 高 2，并不是概率只高 2，而是未归一化权重约高 `exp(2) ≈ 7.39` 倍。
 
-## 二、Softmax 为什么对整体平移不敏感
+## 6.3 Softmax 的平移不变性
 
 对所有 logits 减去同一常数 `c`：
 
@@ -67,7 +71,7 @@ softmax(z) = softmax(z-c)
 
 这条性质允许我们选择最有利于数值稳定的 `c`，通常取本行最大值。
 
-## 三、朴素 Softmax 为什么会溢出
+## 6.4 数值稳定的 Softmax
 
 float32 能表示的有限范围并不足以直接计算任意 `exp(z)`。例如：
 
@@ -88,11 +92,11 @@ probs   ≈ [0.2447, 0.6652, 0.0900]
 
 最大指数变成 `exp(0)=1`，其他指数位于 `(0,1]`，避免正向溢出。
 
-### 下溢是否同样危险
+### 6.4.1 下溢与概率截断
 
 非常负的 shifted logit 可能 `exp` 为 0。这通常表示该 token 概率小到当前 dtype 无法区分，往往比正向溢出更可接受。但如果所有有效候选都因为错误 mask 或 dtype 处理变成 `-inf`，分母会为 0，仍然产生 NaN。
 
-## 四、一行稳定 Softmax 需要三次逻辑阶段
+## 6.5 Stable Softmax 的三个计算阶段
 
 对每行 vocab：
 
@@ -121,7 +125,7 @@ probs  [B,V]
 
 每一行必须独立归一化，不能跨 batch 求 max 或 sum。
 
-## 五、Reduction 怎样在 GPU 上协作
+## 6.6 Softmax 的 GPU Reduction
 
 假设一个 block 处理一行 vocab。每个线程以 stride 读取多个元素，先求局部最大值：
 
@@ -133,7 +137,7 @@ for (int i = threadIdx.x; i < V; i += blockDim.x)
 
 随后要把各线程 `local_max` 合并。
 
-### Shared-memory Tree Reduction
+### 6.6.1 Shared-Memory Tree Reduction
 
 把局部结果写进 shared memory，然后每轮把参与线程减半：
 
@@ -148,7 +152,7 @@ for (int i = threadIdx.x; i < V; i += blockDim.x)
 
 每轮需要保证前一轮写入已完成。
 
-### Warp Shuffle
+### 6.6.2 Warp Shuffle
 
 同一 warp 的线程可以用 shuffle 指令交换寄存器值，不必先写 shared memory。常见结构是：
 
@@ -161,11 +165,11 @@ for (int i = threadIdx.x; i < V; i += blockDim.x)
 
 Warp primitive 能减少同步和 shared-memory 流量，但不会自动解决多 warp、任意 vocab 和边界问题。
 
-### 为什么 Softmax 比 RMSNorm 多一次 Reduction
+### 6.6.3 Softmax 与 RMSNorm 的归约次数
 
 RMSNorm 只需要平方和；稳定 softmax 必须先知道全行最大值，才能安全算指数，再对指数求和。因此至少有 max 和 sum 两个全行统计量。
 
-## 六、Greedy Decoding
+## 6.7 Greedy Decoding
 
 Greedy 不必显式计算完整概率，只要找最大 logit：
 
@@ -184,21 +188,21 @@ next_token = argmax(logits)
 
 许多 API 把 `temperature=0` 特殊解释为 greedy。数学上不能真的计算 `logits/0`。
 
-## 七、Temperature 改变的是什么
+## 6.8 Temperature 对概率比值的影响
 
 ```text
 p_i(T) = softmax(z_i / T)
 ```
 
-### T < 1
+### 6.8.1 $T<1$
 
 放大 logit 差异，分布更尖锐。高分 token 更占优势。
 
-### T > 1
+### 6.8.2 $T>1$
 
 缩小差异，分布更平坦。低分 token 获得更多机会。
 
-### 一个两 token 例子
+### 6.8.3 二元 Logits 数值算例
 
 设 logits `[2,1]`：
 
@@ -210,7 +214,7 @@ T=2:   softmax([1,0.5]) ≈ [0.622, 0.378]
 
 Temperature 不改变 token 排名，只改变随机采样时各候选被选中的概率。
 
-## 八、Top-k Sampling
+## 6.9 Top-k Sampling
 
 Top-k 只保留最高的 k 个 logits，其他设为 `-inf`，再 softmax 和抽样。
 
@@ -225,11 +229,11 @@ flowchart LR
 
 例如 top-k=3 时，即使词表有 150,000 个 token，最终只在最高的 3 个中采样。它减少长尾候选，但不保证三个候选都质量高。
 
-### k=1 与 Greedy
+### 6.9.1 `k=1` 与 Greedy 的输出关系
 
 Top-k=1 后只剩一个候选，采样结果等价于 greedy，但实现路径可能仍经过筛选和概率计算，性能不一定相同。
 
-## 九、Top-p 与 Top-k 的区别
+## 6.10 Top-p Sampling 的动态候选集合
 
 Top-p（nucleus sampling）按概率从高到低排序，保留累计概率达到 p 的最小集合。
 
@@ -240,7 +244,7 @@ Top-k 的候选数量固定；top-p 的候选数量随分布变化：
 
 课程主实现重点为 top-k，但理解 top-p 有助于认识 sampling 不只是 softmax 后调用一次随机函数，还可能包含排序、scan 和 mask。
 
-## 十、随机数与可复现
+## 6.11 随机数状态与可复现边界
 
 Categorical sampling 根据概率随机选择 token。固定 seed 可以让相同执行路径更容易复现，但需要明确随机状态由谁维护：
 
@@ -255,7 +259,7 @@ batch 顺序变化会不会改变随机数消费顺序？
 
 要实现“请求级可复现”，通常需要请求独立的 generator 或明确随机数分配策略。
 
-## 十一、Sampling 参数为什么影响 Batching
+## 6.12 Sampling 参数对 Batching 的约束
 
 如果 batch 内所有请求共用一次 sampler 操作，不同请求仍可能有不同：
 
@@ -270,7 +274,7 @@ stop_token_ids
 
 因此服务层看到“sampling 参数一致的请求更容易合批”不是模型数学限制，而是具体 sampler 和 batching engine 的工程取舍。
 
-## 十二、Sampling 与停止条件的顺序
+## 6.13 Sampling、Token Append 与停止检查的顺序
 
 一次 decode step 常见顺序：
 
@@ -285,7 +289,7 @@ flowchart LR
 
 边界必须定义清楚。例如 `max_tokens=1` 时，prefill 后采样的第一个 token 是否返回？合理语义通常是返回一个生成 token，然后以 length 原因结束，而不是在采样前就结束并返回空输出。
 
-## 十三、Softmax CUDA Kernel 的工程边界
+## 6.14 Softmax CUDA Kernel 的职责边界
 
 输入检查至少包括：
 
@@ -307,9 +311,9 @@ Kernel 应处理：
 
 工业 softmax 还可能融合 mask、scale、top-k 或 sampling，减少中间概率写回。课程先保证稳定 softmax 正确，再讨论 fusion 的收益边界。
 
-## 十四、正确性测试怎样设计
+## 6.15 Softmax 与 Sampling 的正确性测试
 
-### Softmax 测试
+### 6.15.1 Softmax
 
 ```text
 每行概率和接近 1
@@ -319,49 +323,49 @@ Kernel 应处理：
 大正数不产生 NaN
 ```
 
-### Greedy 测试
+### 6.15.2 Greedy
 
 构造明确最大值，确认 token ID。加入非首位置最大值，避免错误地固定返回 0。
 
-### Temperature 测试
+### 6.15.3 Temperature
 
 不应只检查某次随机 token。可以检查变换后概率分布，或固定 generator 后比较 reference。
 
-### Top-k 测试
+### 6.15.4 Top-k
 
 确认被 mask 的 token 永远不会采到，并覆盖 `k=1`、`k=vocab` 和非法 k。
 
-### 随机性测试
+### 6.15.5 随机性
 
 统计测试需要足够样本，不能因一次抽样没选到某 token 就断言概率为 0。普通单元测试更适合使用固定 RNG 和小分布 reference。
 
-## 十六、常见误区
+## 6.16 数值与生成语义的适用边界
 
-### Logit 最大的 token 概率一定接近 1
+### 6.16.1 最大 Logit 不保证高概率
 
 不一定。如果多个 logits 接近，最大 token 概率仍可能很低。
 
-### Temperature=0 就是除以 0
+### 6.16.2 `temperature=0` 应采用 Greedy 分支
 
 实际 API 通常把它作为 greedy 特殊分支。
 
-### 固定 seed 后，任何 batching 都输出相同
+### 6.16.3 固定 Seed 不保证跨 Batching 策略一致
 
 Batch 顺序可能改变随机数消费顺序。请求级复现需要更明确的 RNG 管理。
 
-### Stable softmax 只为 fp16 准备
+### 6.16.4 Stable Softmax 适用于所有浮点 Dtype
 
 即使 float32，巨大 logit 的指数也会溢出。减 max 是通用稳定做法。
 
-### Sampling 只影响文本，不影响系统
+### 6.16.5 Sampling 同时影响执行分组
 
 参数差异可能改变合批、排序工作和 sampler 开销。
 
-### 每次都必须写出完整概率矩阵
+### 6.16.6 生成实现不一定物化完整概率矩阵
 
 Greedy 只需 argmax；融合 sampler 也可能避免把完整 probs 写回 global memory。
 
-## 十七、学完本周，应能回答
+## 6.17 本章小结与思考题
 
 1. Logit 与概率有什么区别？
 2. 为什么 softmax 可以减去最大值而不改变结果？
@@ -372,10 +376,12 @@ Greedy 只需 argmax；融合 sampler 也可能避免把完整 probs 写回 glob
 7. 固定 seed 为什么不保证不同 batching 下结果相同？
 8. Sampling 参数为什么可能降低合批机会？
 
-## 参考与素材说明
+## 参考资料
 
-- 猛猿：[Self-Attention 学习笔记](https://zhuanlan.zhihu.com/p/455399791)
-- 猛猿：[FlashAttention V1](https://zhuanlan.zhihu.com/p/669926191)
-- 课程工程：Sampler、CUDA row-wise softmax 与 Week 06 grader
+- PyTorch：[`torch.nn.functional.softmax`](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.softmax.html)
+- PyTorch：[`torch.multinomial`](https://docs.pytorch.org/docs/stable/generated/torch.multinomial.html)
+- Hugging Face Transformers：[Generation strategies](https://huggingface.co/docs/transformers/main/en/generation_strategies)
+- NVIDIA：[CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html)
+- 课程工程：[`sampler.py`](../../../course_vllm/engine/sampler.py)、[`cuda_ops.py`](../../../course_vllm/kernels/cuda_ops.py) 与 [`course_ops.cu`](../../../kernels/course_ops.cu)
 
-本文的 softmax 推导、数值例子、CUDA 映射和 sampling 实验均为课程原创组织。Attention 中 softmax 的在线形式留到 Week 07 展开。
+Attention 中不物化完整 score matrix 的 online softmax 将在第 7 章展开。
