@@ -452,36 +452,6 @@ TTFT/TPOT SLO
 
 避免按理论 100% 运行；考虑流量波动、碎片和版本变化。
 
-## 十九、本周实验
-
-### 实验 1：单卡账本
-
-列出每项 GiB 与来源，确认总和和 safety。
-
-### 实验 2：KV Slots
-
-手算 bytes/token、block bytes、blocks、slots，与 planner 对齐。
-
-### 实验 3：长度分布
-
-比较全 2k、混合短长、少量 32k 的并发上限和内部碎片。
-
-### 实验 4：SLO 容量
-
-逐步提高并发，找显存上限与 goodput/SLO 上限，两者分别报告。
-
-### 实验 5：TP 通信
-
-估算每 token collective bytes 与次数，比较 NVLink/PCIe/网络带宽下时间。
-
-### 实验 6：PP Bubble
-
-改变 stages/microbatches，计算 bubble 并解释在线 decode 限制。
-
-### 实验 7：策略建议
-
-给出至少三个场景：权重放不下、KV 不够、吞吐不足，分别选择方案并说明不选其他方案的原因。
-
 ## 二十、常见误区
 
 ### 24GB GPU 就有 24GiB 可用

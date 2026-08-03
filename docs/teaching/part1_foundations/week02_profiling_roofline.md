@@ -397,55 +397,6 @@ p99 TTFT: 0.7s -> 5.2s
 
 这才是可辩护的性能结论：每一步都有证据，也明确说明尚未证明什么。
 
-## 十、本周实验设计
-
-### 实验 1：稳定服务 Baseline
-
-固定模型、dtype、prompt 集合、输出长度和 sampling。记录：
-
-```text
-requests/s
-output tokens/s
-TTFT 或 E2E p50/p90/p99
-平均 batch size
-queue depth
-错误与超时
-```
-
-### 实验 2：PyTorch Profiler
-
-分别选择 prefill、decode、mixed workload。回答：
-
-- 时间最多的 5 个 op 是什么？
-- CPU self time 和 CUDA self time 是否指向相同热点？
-- 是否有大量 copy、contiguous 或同步？
-- 自定义 kernel 是否真实出现？
-
-### 实验 3：Nsight Systems
-
-提交一张时间线并标注：
-
-```text
-CPU request handling
-H2D copy
-prefill kernels
-decode kernels
-GPU idle gaps
-明确的同步点
-```
-
-### 实验 4：Nsight Compute
-
-选择一个 kernel，不要一次分析整个服务。至少解释：
-
-```text
-它处理什么 shape
-运行多长时间
-更像 compute-bound 还是 memory-bound
-依据哪些计数器
-当前证据的局限
-```
-
 ## 十一、常见错误
 
 ### Profiler 打开后，直接比较绝对延迟

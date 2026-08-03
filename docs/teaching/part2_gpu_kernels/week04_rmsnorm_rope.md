@@ -366,28 +366,6 @@ offline_generate
 
 `auto` 模式允许失败后回退，适合普通运行；严格验收需要 `cuda` 模式或 profiler kernel 证据。否则“输出正确”可能只是 reference 路径正确。
 
-## 十三、本周实验
-
-### 实验 1：手算 RMSNorm
-
-对小向量手算 mean square、rms 和输出，再和 PyTorch/CUDA 对齐。目的是确认归约维度和公式，而不是只看随机测试通过。
-
-### 实验 2：累加精度
-
-比较低精度直接累加与 fp32 累加的误差，尤其关注 hidden size 增大后的变化。
-
-### 实验 3：RoPE 小维度可视化
-
-对一个二维向量选择几个 position，画出旋转方向，验证长度基本不变，并观察 Q/K 点积如何随相对距离变化。
-
-### 实验 4：Shape 与边界
-
-测试不同 rows、hidden、seq_len 和 head_dim。对不支持的奇数 head_dim 给出明确错误，而不是静默越界。
-
-### 实验 5：主路径证据
-
-用强制 CUDA 模式运行短生成，提交 kernel 名称或严格测试结果。
-
 ## 十四、常见误区
 
 ### RMSNorm 是把向量限制到 [-1,1]

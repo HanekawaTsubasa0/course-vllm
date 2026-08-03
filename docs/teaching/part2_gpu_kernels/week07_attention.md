@@ -464,32 +464,6 @@ Decode 读取超过 context_len，或 paged slot 计算错误。
 - 后续 tile 出现更大 max 时旧累加器正确重缩放；
 - 极端 logits 不出现 NaN。
 
-## 十七、本周实验
-
-### 实验 1：三 Token 手算
-
-手算 scores、mask、softmax 和 weighted V，作为所有复杂实现的最小 oracle。
-
-### 实验 2：Prefill vs Decode Shape
-
-给出同一请求在 prefill 和第 3 个 decode step 的 Q/K/V shape 与 score 元素数。
-
-### 实验 3：GQA 映射
-
-画出 Hq=16、Hkv=4 时每个 Q head 对应的 KV head。
-
-### 实验 4：Score Matrix 显存
-
-计算不同 S、H、dtype 下显式 score tensor 大小，解释 S 翻倍为何变 4 倍。
-
-### 实验 5：Online Softmax
-
-把一行 scores 拆成多个 tile，逐步记录 m/l/o，并与一次性 softmax 对齐。
-
-### 实验 6：CUDA/Reference
-
-报告 dense/paged attention 最大误差，并用严格模式证明 CUDA dispatch。
-
 ## 十八、教学 Kernel 与生产 Kernel 的差距
 
 至少包括：

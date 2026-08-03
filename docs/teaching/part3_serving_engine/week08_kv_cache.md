@@ -346,32 +346,6 @@ Cache release 应放在可靠的 finally/生命周期管理中。资源泄漏测
 
 前者是自回归生成的基础，后者是跨请求复用优化。Prefix caching 还需要 hash、引用计数和 eviction，留到 Week 10/15。
 
-## 十四、本周实验
-
-### 实验 1：重复工作计算
-
-对给定 L/T，计算无 cache 与有 cache 的 token-forward 数，说明 cache 省掉什么、没有省掉什么。
-
-### 实验 2：Shape 表
-
-记录每层 prefill K/V、单步 new K/V、handle 和 batch decode 输入 shape。
-
-### 实验 3：连续 Append
-
-用小 tensor 连续 append 多个 token，检查 length、旧数据和新位置。
-
-### 实验 4：Full vs Cached
-
-对齐多个 decode step logits，记录 max/mean error。
-
-### 实验 5：不同长度 Batch
-
-构造三种 context length，观察 padding 或 length bucketing，说明各自浪费。
-
-### 实验 6：Release 与取消
-
-模拟正常完成和异常取消，确认 cache usage 恢复。
-
 ## 十五、常见误区
 
 ### KV Cache 让 Decode 变成 O(1)

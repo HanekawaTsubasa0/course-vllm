@@ -439,32 +439,6 @@ release
 - A 结束不影响 B；
 - 每条 finish_reason 正确。
 
-## 十六、本周实验
-
-### 实验 1：画状态机
-
-标出每个状态拥有的字段、允许的下一状态和 release 时点。
-
-### 实验 2：逐 Token Trace
-
-记录一个 4-token 请求：输入 token、logits 来源、采样 token、generated length、cache length、event、finish check。
-
-### 实验 3：停止边界
-
-构造 EOS、stop、max_tokens 三类请求，确认最后 token 与 finish reason。
-
-### 实验 4：Streaming/Non-streaming
-
-确认两者生成 token IDs 一致，只改变返回时机。
-
-### 实验 5：取消与泄漏
-
-循环取消请求，观察 cache usage 是否恢复。
-
-### 实验 6：Profiler
-
-提交 prefill/decode 分段结果，作为后续优化 baseline。
-
 ## 十七、常见误区
 
 ### Prefill 后必须 decode 一次才有首 token

@@ -374,32 +374,6 @@ KV utilization / fragmentation
 
 模型集成测试再验证 schedule metadata 能被 backend 正确执行。
 
-## 十七、本周实验
-
-### 实验 1：逐轮手算
-
-给出 A/B/C prompt/output 和预算，列出每轮 waiting、running、batch tokens、KV blocks、finished。
-
-### 实验 2：Fixed vs Continuous
-
-比较同一组长短请求的总完成时间、平均 batch size 和短请求延迟。
-
-### 实验 3：Chunked Prefill
-
-改变 chunk/token budget，观察长 prompt TTFT、decode p99 ITL 和吞吐。
-
-### 实验 4：Batch Window
-
-比较 0/1/2/5 ms 收集窗口，画吞吐与 TTFT 曲线。
-
-### 实验 5：Preemption
-
-构造 block 不足，记录被抢占请求、释放量、恢复代价和状态转换。
-
-### 实验 6：内部合批证据
-
-用 scheduler stats/profiler 证明多个请求在同一模型 iteration 中执行。
-
 ## 十八、常见误区
 
 ### Continuous batching 就是异步 HTTP

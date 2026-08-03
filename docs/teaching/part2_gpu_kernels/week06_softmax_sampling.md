@@ -335,32 +335,6 @@ Kernel 应处理：
 
 统计测试需要足够样本，不能因一次抽样没选到某 token 就断言概率为 0。普通单元测试更适合使用固定 RNG 和小分布 reference。
 
-## 十五、本周实验
-
-### 实验 1：溢出复现
-
-对 `[1000,1001,999]` 比较朴素与稳定 softmax，记录 NaN/Inf 和最终概率。
-
-### 实验 2：Reduction 映射
-
-画出一行 vocab 如何被 256 个线程分段读取，以及 warp 结果怎样合并。
-
-### 实验 3：Temperature 分布
-
-固定 logits，计算多个 temperature 下的 entropy 或概率变化，解释“更随机”的定量含义。
-
-### 实验 4：Top-k
-
-构造 10-token 分布，比较 k=1、3、10 的候选集合与输出。
-
-### 实验 5：主路径
-
-从模型 logits 跟踪到 sampler、softmax dispatch、token append 和 finish check，提交调用链。
-
-### 实验 6：CUDA 证据
-
-强制 CUDA softmax 路径并与 PyTorch reference 对齐，报告最大误差与真实 kernel 证据。
-
 ## 十六、常见误区
 
 ### Logit 最大的 token 概率一定接近 1

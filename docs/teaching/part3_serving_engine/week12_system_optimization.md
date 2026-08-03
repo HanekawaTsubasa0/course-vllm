@@ -362,32 +362,6 @@ Compute 必须等待对应 batch copy event，不能错误等待别的 batch，�
 
 已在 transfer 的请求取消后，buffer/event 仍需安全回收；已 admission 但未执行应从 queue 移除。
 
-## 十八、本周实验
-
-### 实验 1：Pageable vs Pinned
-
-固定 shape 和重复次数，比较 H2D latency；分别报告 cold/steady，并确认 pinned 分配不计入每次 copy 热路径。
-
-### 实验 2：non_blocking 条件
-
-组合 pageable/pinned、default/transfer stream、立即同步/事件依赖，观察 timeline。
-
-### 实验 3：Overlap
-
-构造 batch N compute 与 batch N+1 copy，提交有/无重叠时间线。
-
-### 实验 4：Admission
-
-测试 char limit、token limit、queue full、正常请求和并发竞争。
-
-### 实验 5：过载曲线
-
-逐步提高到达率，记录 queue、TTFT、goodput、reject rate。找出拒绝前后系统是否避免崩溃。
-
-### 实验 6：Ablation
-
-逐项打开优化，报告 tokens/s、TTFT/TPOT p99、GPU gaps 与 H2D overlap。
-
 ## 十九、常见误区
 
 ### non_blocking=True 就一定异步重叠

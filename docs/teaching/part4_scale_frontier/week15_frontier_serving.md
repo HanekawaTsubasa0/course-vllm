@@ -137,7 +137,7 @@ estimated reusable tokens
 request age / tenant
 ```
 
-### 实验不能只比较 Shared-Prefix Score
+### 分析不能只比较 Shared-Prefix Score
 
 教学 demo 可用相邻共享前缀得分说明顺序有变化，但完整服务还要测：
 
@@ -276,9 +276,9 @@ prefix locality
 
 Shortest Remaining Processing Time 可降低平均完成时间，但 LLM 的剩余输出长度未知。可以用用户 max_tokens、历史统计或预测模型估计，预测错误会影响公平性。
 
-### TokenDance-style 教学近似
+### 剩余工作量调度的教学近似
 
-可定义 completion cost，优先推进预计更快完成的 sequence，再加入 aging 防止长请求饥饿。
+课程 demo 定义一个简化的 completion cost，优先推进预计更快完成的 sequence，再加入 aging 缓解长请求饥饿。这只是 shortest-remaining-work 思路的教学启发式，不对应某篇论文的完整机制。
 
 Demo 的排序分数不等于完整 scheduler。生产还要结合 KV、batch shape、抢占和多租户。
 
@@ -388,22 +388,6 @@ error/retry
 | Metrics | 怎样证明收益且满足 SLO？ |
 | Integration | 落到课程哪些模块？ |
 | Gap | Demo 与生产系统差什么？ |
-
-## 十五、三个最小复现实验
-
-### Cache-Aware
-
-输入多个 token 前缀，比较 FIFO 与 cache-aware 排序的共享完整 blocks、实际模拟 hit 和公平等待。
-
-### PD Disaggregation
-
-输入 `(prompt_len, output_len)`，估算 prefill/decode workload、KV transfer bytes 和两池 makespan；改变网络带宽看拐点。
-
-### Token-Level Scheduling
-
-给请求 arrival、估计 remaining tokens、age，比较 FIFO/SRPT-like/aging policy 的平均完成时间和最大等待。
-
-这些 demo 用于验证机制方向，不代表完整在线 serving。
 
 ## 十六、从 Demo 到主路径要补什么
 

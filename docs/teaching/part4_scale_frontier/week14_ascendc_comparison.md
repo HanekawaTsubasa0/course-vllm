@@ -1,13 +1,10 @@
-# Week 14：从 CUDA 到 Ascend C，换硬件后哪些原则不变
+# 第 14 章：从 CUDA 到 Ascend C，换硬件后哪些原则不变
 
 ## 本周为什么不强行要求写一个 Ascend Kernel
 
 课程当前没有统一可用的 Ascend 硬件、CANN 版本和 CI。若只复制一段无法运行的样例，学生既不能验证正确性，也不能确认性能与工具链，反而会把“看过 API”误当成“掌握算子开发”。
 
-因此 Week 14 的交付分两层：
-
-- 所有人完成 CUDA 与 Ascend C 的编程模型对照；
-- 只有具备明确硬件与 CANN 环境时，才运行官方 Add 样例并提交真实证据。
+因此本章只完成 CUDA 与 Ascend C 的编程模型对照，阅读官方 Add 样例的数据流，不安排 Ascend 硬件实验，也不要求运行或提交 Ascend C kernel。等课程统一确定硬件、CANN 版本和验收环境后，再单独开发实验任务书。
 
 这不是降低技术要求，而是坚持前面课程建立的原则：没有可复现环境，就不伪造运行结论。
 
@@ -346,24 +343,9 @@ Global/Local 搬运
 
 这套问题比记忆某版 API 更持久。
 
-## 十八、本周实验/阅读任务
+## 十八、阅读官方样例时应观察什么
 
-### 无 Ascend 环境
-
-1. 选择 Add 或 RMSNorm；
-2. 写出 CUDA 数据路径；
-3. 写出 Ascend C 概念数据路径；
-4. 对照并行单位、存储、搬运、同步、边界、编译和 profiler；
-5. 标明无法验证的部分。
-
-### 有 Ascend 环境
-
-1. 固定 CANN/hardware；
-2. 运行官方 Add sample；
-3. 保存编译与 NPU correctness；
-4. 改变长度，验证尾块；
-5. 用官方 profiler 观察；
-6. 不直接把样例性能外推到 LLM 算子。
+阅读 Add 或 RMSNorm 样例时，重点追踪 host/device 分工、核间 tiling、Global/Local 数据搬运、计算阶段、尾块边界和编译调用链。没有统一运行环境时，只讨论代码表达的机制，不根据样例推断真实性能，也不把静态阅读写成设备验证结论。
 
 ## 十九、对照表
 
@@ -419,4 +401,4 @@ API 和文档会演进，必须固定版本。
 - [官方 Add 实现样例](https://www.hiascend.com/document/detail/zh/canncommercial/700/operatordev/Ascendcopdevg/atlas_ascendc_10_0018.html)
 - [CANN 9.0 Ascend C 编程指南入口](https://www.hiascend.com/document/detail/zh/canncommercial/900/programug/Ascendcopdevg/atlas_ascendc_10_0060.html)
 
-本文以跨硬件原则为主，API 名称只用于建立当前文档中的概念。正式实验必须选择同一 CANN 版本的成套资料，不混用不同版本代码。
+本文以跨硬件原则为主，API 名称只用于建立当前文档中的概念。本章实验暂缓；未来恢复实验时必须选择同一 CANN 版本的成套资料，不混用不同版本代码。

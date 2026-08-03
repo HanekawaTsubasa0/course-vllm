@@ -1,95 +1,60 @@
-# LLM Serving 课程讲义总目录
+# 《大模型推理服务：从算子到系统》课程讲义
 
-这套讲义围绕一个问题展开：怎样把“模型能够生成文本”，逐步建设成一个可解释、可验证、可优化的 LLM Serving 系统。
+这套讲义回答一个贯穿全书的问题：一个只能离线生成文本的模型，怎样变成可度量、可并发、可扩展、可优化的在线推理服务？
 
-课程不是按零散技术名词排列，而是沿着一条完整链路推进：先理解请求与指标，再进入 GPU 算子和 Attention，随后管理 KV 状态、请求调度与系统容量，最后学习如何读前沿工作并用证据完成验收。
+讲义按知识依赖组织为五篇，而不是把十六周写成彼此独立的知识点清单。正文只承担教学任务：解释概念、推导机制、分析代码和讨论工程取舍。环境配置、操作命令、提交要求和评分标准另见实验任务书。
 
-## 第一阶段：先把请求和性能问题说清楚
+## 阅读地图
 
-### [Week 01：一次回答是怎样被生成出来的](week01_serving_metrics.md)
+### 第一篇：服务与性能基础
 
-从 Token、Logits、Sampling 和 Chat Template 开始，完整解释 Prefill、Decode、KV Cache、Streaming、TTFT、TPOT、吞吐、长尾延迟与 Goodput。目标是建立后续所有优化共同使用的语言。
+- [第 1 章：一次回答是怎样被生成出来的](part1_foundations/week01_serving_metrics.md)
+- [第 2 章：性能分析不是猜哪里慢](part1_foundations/week02_profiling_roofline.md)
 
-### [Week 02：性能分析不是猜哪里慢](week02_profiling_roofline.md)
+这一篇建立全书共同语言：token、prefill、decode、KV cache、TTFT、TPOT、吞吐、尾延迟、GPU 异步执行和 Roofline。
 
-建立服务指标、框架算子、系统时间线和单 Kernel 微架构四层证据。重点学习 GPU 异步计时、Warmup、Roofline、Arithmetic Intensity，以及怎样把现象写成可验证的性能假设。
+### 第二篇：GPU 编程与核心算子
 
-## 第二阶段：看清模型一步怎样在 GPU 上执行
+- [第 3 章：一个 PyTorch Tensor 怎样走进 CUDA Kernel](part2_gpu_kernels/week03_cuda_extension.md)（教材化样章）
+- [第 4 章：RMSNorm 与 RoPE](part2_gpu_kernels/week04_rmsnorm_rope.md)
+- [第 5 章：矩阵乘与 Linear](part2_gpu_kernels/week05_matmul_linear.md)
+- [第 6 章：Softmax、Sampling 与生成策略](part2_gpu_kernels/week06_softmax_sampling.md)
+- [第 7 章：Attention 为什么难以高效实现](part2_gpu_kernels/week07_attention.md)
 
-### [Week 03：从 PyTorch 算子走到 CUDA Kernel](week03_cuda_extension.md)
+这一篇从最小 CUDA 闭环出发，逐步进入归约、数据复用、矩阵乘、概率计算和 Attention。重点不是背 API，而是把数学、张量布局、线程工作和硬件瓶颈对应起来。
 
-解释 Extension、Binding、Dispatch、Launch Configuration、Grid-Stride Loop、内存合并访问与正确性验收。重点不是“写出能跑的 CUDA”，而是证明 GPU 路径真的被调用，并且数值和边界条件正确。
+### 第三篇：KV 状态与推理引擎
 
-### [Week 04：RMSNorm 与 RoPE](week04_rmsnorm_rope.md)
+- [第 8 章：KV Cache 是怎样工作的](part3_serving_engine/week08_kv_cache.md)
+- [第 9 章：一个请求如何穿过推理引擎](part3_serving_engine/week09_engine_request_lifecycle.md)
+- [第 10 章：Paged KV 与 Block Manager](part3_serving_engine/week10_paged_kv_block_manager.md)（教材化样章）
+- [第 11 章：Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
+- [第 12 章：系统优化必须闭环](part3_serving_engine/week12_system_optimization.md)
 
-拆解归一化和位置编码的数学含义、数值稳定性、Reduction、向量化与融合机会。通过 RMSNorm 和 RoPE 观察公式、张量布局与 GPU 实现之间的对应关系。
+这一篇把视角从单次前向扩展到多请求系统：历史状态怎样存放，请求怎样调度，显存怎样分配，优化结论怎样用证据闭环。
 
-### [Week 05：矩阵乘与 Linear](week05_matmul_linear.md)
+### 第四篇：规模化、异构平台与前沿机制
 
-从朴素 GEMM 进入 Tiling、Shared Memory、数据复用、Tensor Core、算子融合和形状敏感性。解释为什么“矩阵乘法计算量很大”并不自动意味着实现已经接近硬件峰值。
+- [第 13 章：容量规划与并行策略](part4_scale_frontier/week13_capacity_parallelism.md)
+- [第 14 章：Ascend C 编程模型导读](part4_scale_frontier/week14_ascendc_comparison.md)（实验暂缓）
+- [第 15 章：怎样读懂新的 LLM Serving 机制](part4_scale_frontier/week15_frontier_serving.md)
 
-### [Week 06：Softmax、Sampling 与生成策略](week06_softmax_sampling.md)
+这一篇讨论单卡之外的问题。Ascend C 当前只做概念对照，不要求硬件实验；前沿专题强调从论文主张追到系统状态、资源变化和评价指标。
 
-解释稳定 Softmax、Temperature、Top-k、Top-p、Greedy 与随机采样；把数值变换、概率分布和用户可见生成行为连起来，并讨论 GPU 上 Reduction 与采样流水线的成本。
+### 第五篇：系统综合
 
-### [Week 07：Attention 为什么难以高效实现](week07_attention.md)
+- [第 16 章：把 LLM Serving 系统讲成一条证据链](part5_synthesis/week16_final_review.md)
 
-从标准 Attention 的矩阵公式出发，解释因果掩码、缩放、Online Softmax、FlashAttention、Prefill/Decode 形状差异，以及为什么减少中间张量读写往往比减少少量计算更重要。
+最后一篇把正确性、接入、性能、容量和可靠性证据组织成完整的系统论证。
 
-## 第三阶段：管理历史状态和请求生命周期
+## 编写与维护
 
-### [Week 08：KV Cache 是怎样工作的](week08_kv_cache.md)
+- [全书重构计划](BOOK_PLAN.md)：记录篇章目标、重写顺序和当前状态。
+- [讲义写作规范](STYLE_GUIDE.md)：规定章节结构、术语、公式、代码、图表和 PPT 素材规则。
+- [图表素材目录](assets/README.md)：保存可复用于讲义和 PPT 的原始素材。
+- [旧稿资料映射](references/legacy_source_map.md)：仅用于追溯上一版资料来源，不约束新讲义结构。
+- [旧稿校验记录](archive/expanded_draft_validation_report.md)：记录保存提交中的统计结果，不代表新教材已经完成验收。
 
-解释 KV Cache 为什么能够消除重复计算、每个 Token 的缓存占用怎样估算、张量布局如何影响访问效率，以及容量、并发和最大上下文之间为什么必须共同规划。
+## 当前状态
 
-### [Week 09：一个请求如何穿过推理引擎](week09_engine_request_lifecycle.md)
-
-沿 API、Engine、Request、Sequence、Scheduler、Model Runner 和输出处理追踪请求。重点区分控制面与数据面、Waiting 与 Running、逻辑状态与 GPU 执行状态。
-
-### [Week 10：Paged KV 与 Block Manager](week10_paged_kv_block_manager.md)
-
-把连续 KV 预留改写为逻辑块到物理块的映射问题。解释内部碎片、Block Table、分配/释放、引用计数、Copy-on-Write，以及分页机制为何不改变 Attention 的数学语义。
-
-### [Week 11：Continuous Batching](week11_continuous_batching.md)
-
-解释迭代级调度、动态加入与退出、Token Budget、Chunked Prefill、公平性和长尾延迟。通过调度时间线理解为什么连续批处理不是“把 batch size 调大”。
-
-### [Week 12：系统优化必须闭环](week12_system_optimization.md)
-
-把优化写成 Observation、Hypothesis、Change、Evidence、Conclusion 的证据链。覆盖 CPU Overhead、Kernel Launch、同步、内存分配、算子融合、CUDA Graph 和性能回归保护。
-
-## 第四阶段：扩展容量、跨硬件迁移并跟进前沿机制
-
-### [Week 13：容量规划与并行策略](week13_capacity_parallelism.md)
-
-从权重、KV Cache、激活和运行时开销推导显存预算，再比较 Tensor、Pipeline、Data 和 Expert Parallel。解释通信量、负载均衡、扩展效率与 SLO 之间的关系。
-
-### [Week 14：用 Ascend C 重做一次算子推理](week14_ascendc_comparison.md)
-
-不做 CUDA API 的逐词翻译，而是比较硬件层级、执行单元、内存层次、流水与编程模型。通过同一算子的双平台实现，训练从算法语义到设备映射的迁移能力。
-
-### [Week 15：怎样读懂一个新的 LLM Serving 机制](week15_frontier_serving.md)
-
-用 Paper-to-System 五问分析 Prefix Cache、Cache-Aware Scheduling、Prefill/Decode 分离、KV Transfer、Chunked Prefill、Token-Level Scheduling、Speculative Decoding 与 MLA，明确收益、代价、状态和公平对照。
-
-### [Week 16：把整个 LLM Serving 系统讲成一条证据链](week16_final_review.md)
-
-把 Correctness、Dispatch、Integration、Performance、Capacity 和 Reliability 六类证据组织成最终展示。提供 Claim-Evidence Matrix、A/B 实验、故障复盘、复现清单和答辩自检问题。
-
-## 建议使用方式
-
-第一次学习时按 Week 01 到 Week 16 顺序阅读。每周先回答开头提出的问题，再读概念与推导，最后完成实验和自检；不要只看代码片段。
-
-回查问题时可以按对象定位：指标问题看 Week 01-02，算子问题看 Week 03-07，KV 和调度问题看 Week 08-12，容量与前沿机制看 Week 13-15，最终验收看 Week 16。
-
-讲义中的 Mermaid 图是为课程重新设计的结构图与时间线；外部资料用于进一步阅读，并在各周末尾单独列出。知乎文章只作为参考来源之一，不替代课程自身的论证和实验。
-
-## 交付统计
-
-- 讲义数量：16 篇
-- 正文总行数：7,613 行
-- 正文总大小：222,339 字节
-- Mermaid 原创图示：45 张
-- 外部链接：73 处，去重后 30 个
-- 验证详情：[课程讲义验证报告](course_validation_report.md)
-- 资料映射：[猛猿文章与课程素材映射](source_map.md)
+第 3 章和第 10 章是第一批教材化样章，分别验证“GPU 算子课”和“推理系统课”两种写法。其余章节暂时保留上一版正文作为素材，后续按 `BOOK_PLAN.md` 的依赖顺序重写。

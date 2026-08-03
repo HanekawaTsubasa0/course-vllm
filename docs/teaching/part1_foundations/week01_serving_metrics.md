@@ -348,6 +348,14 @@ TPOT = (816 - 650) / 3
 
 不同 benchmark 对 TPOT 是否包含某些边界时间可能有不同定义。提交报告时必须把公式写出来，而不能只给一个名为 `tpot` 的数字。
 
+课程工程当前 benchmark 还输出一个名为 `estimated_tpot_s` 的简化代理量：
+
+```text
+estimated_tpot_s = 所有请求延迟之和 / 所有输出 token 数
+```
+
+这个量包含排队、prefill 和首 token 时间，并不是上面定义的标准 TPOT。它只适合在请求分布、并发度和测量边界完全相同的课程实验中做粗略对比，不能与其他系统报告的 TPOT 直接比较。后续整理 benchmark 时，应优先记录每个 token 的到达时间，再按明确公式计算标准指标。
+
 ### 3. 端到端延迟
 
 ```text
@@ -502,63 +510,6 @@ flowchart LR
 ```
 
 作者在新旧两版 vLLM 整体流程文章中都围绕这条共享内核展开：[vLLM V1 整体流程](https://zhuanlan.zhihu.com/p/1900126076279160869)、[旧版整体架构](https://zhuanlan.zhihu.com/p/691045737)。这里要学习的是稳定的系统关系，而不是记住某一版源码的类名。
-
-## 八、第一周怎样做一个可信的 Baseline
-
-第一周不优化。先证明我们能描述发生了什么。
-
-### 实验一：Streaming 与 non-streaming
-
-对同一个 prompt、同一个 `max_tokens` 和同一个 sampling 配置，分别发送 streaming 和 non-streaming 请求。
-
-需要记录：
-
-- 两种模式的最终输出是否一致；
-- 第一个 token 何时可见；
-- 完整请求何时结束；
-- streaming 是否改变模型执行方式，还是只改变响应方式。
-
-### 实验二：只改变 prompt 长度
-
-保持输出上限为 16 token，分别使用短 prompt 和长 prompt。重点观察 TTFT，而不是只看总延迟。
-
-如果长 prompt 的 TTFT 增加，但后续 TPOT 相近，可以初步判断变化主要发生在 prefill。这里仍不能直接下最终结论，因为队列和 batch 也可能变化；需要结合服务端时间分解。
-
-### 实验三：只改变输出长度
-
-保持 prompt 不变，把输出上限从 16 调到 128。此时 prefill 工作基本相同，而 decode 轮数增加。总延迟会明显上升，TTFT 不应按同一比例增长。
-
-### 实验四：改变并发度
-
-使用同一组请求，比较 concurrency 1 和 concurrency 4：
-
-- tokens/s 是否提高；
-- TTFT 是否因为 batch 等待或排队而上升；
-- p99 是否恶化；
-- 服务是否真正形成了 batch。
-
-### 必须记录的实验条件
-
-```text
-model / dtype / device
-backend / kv mode
-prompt token 数
-max output tokens
-temperature / seed
-concurrency
-streaming mode
-```
-
-如果没有 workload 描述，任何性能数字都无法复现。
-
-### Baseline 表
-
-| 场景 | 输入 tokens | 输出 tokens | 并发 | TTFT p50/p99 | TPOT p50/p99 | E2E p50/p99 | tokens/s | 错误数 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 短 prompt / 短输出 |  |  | 1 |  |  |  |  |  |
-| 长 prompt / 短输出 |  |  | 1 |  |  |  |  |  |
-| 短 prompt / 长输出 |  |  | 1 |  |  |  |  |  |
-| 短 prompt / 短输出 |  |  | 4 |  |  |  |  |  |
 
 ## 九、把几个常见误解当场拆开
 

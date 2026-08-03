@@ -482,21 +482,6 @@ AscendC 因何 deferred
 
 课程目标是可读、可测地理解机制；明确说明功能/性能差距。
 
-## 十七、最终评分建议
-
-| 维度 | 关注点 |
-| --- | --- |
-| Concept | 能否解释机制和取舍 |
-| Correctness | Reference、边界、误差 |
-| Integration | 端到端与资源生命周期 |
-| Dispatch | 目标路径真实执行 |
-| Performance | Workload、分位数、profiler、归因 |
-| Capacity | 显存、KV、SLO、通信 |
-| Reliability | 取消、过载、错误、泄漏 |
-| Communication | 图、复现、限制、引用 |
-
-不能让“模型能聊天”覆盖其他维度，也不能让一张漂亮 profiler 截图替代概念理解。
-
 ## 十八、最终自检问题
 
 1. 能否不看代码画出请求主路径？

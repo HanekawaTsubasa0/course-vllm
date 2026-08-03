@@ -417,38 +417,6 @@ flowchart LR
 
 同一个 kernel 在大矩阵上表现不错，不代表 decode 的小 M 场景也合适。
 
-## 十五、本周实验
-
-### 实验 1：手算小矩阵
-
-对 `A[2,3] @ B[3,2]` 手算 C，逐项对应 kernel 索引，先排除 layout 错误。
-
-### 实验 2：Naive Correctness
-
-覆盖方阵、非方阵和边界 shape，记录最大绝对误差。
-
-### 实验 3：Tiled Correctness
-
-重点使用不能整除 tile size 的 M/N/K，并验证越界元素补 0。
-
-### 实验 4：访存解释
-
-用一个小 tile 画出 A/B 元素被哪些输出线程复用。不能只写“shared memory 更快”。
-
-### 实验 5：性能对照
-
-报告：
-
-| Shape | dtype | naive | tiled | PyTorch/cuBLAS | max error |
-| --- | --- | ---: | ---: | ---: | ---: |
-| decode-like |  |  |  |  |  |
-| prefill-like |  |  |  |  |  |
-| boundary |  |  |  |  |  |
-
-### 实验 6：模型接入
-
-强制 CUDA 路径运行短生成，提交调用链和 profiler 证据。
-
 ## 十六、常见误区
 
 ### Tiled 数学公式与 naive 不同
