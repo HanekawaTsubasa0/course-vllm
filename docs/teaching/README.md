@@ -36,7 +36,7 @@
 ### 第四篇：规模化、异构平台与前沿机制
 
 - [第 13 章：推理服务的显存容量、通信成本与并行策略](part4_scale_frontier/week13_capacity_parallelism.md)
-- [第 14 章：Ascend C 编程模型导读](part4_scale_frontier/week14_ascendc_comparison.md)（实验暂缓）
+- [第 14 章：CUDA 与 Ascend C 的编程模型和数据流比较](part4_scale_frontier/week14_ascendc_comparison.md)（实验暂缓）
 - [第 15 章：前沿 LLM Serving 机制的 Paper-to-System 分析](part4_scale_frontier/week15_frontier_serving.md)
 
 这一篇讨论单卡之外的问题。Ascend C 当前只做概念对照，不要求硬件实验；前沿专题强调从论文主张追到系统状态、资源变化和评价指标。

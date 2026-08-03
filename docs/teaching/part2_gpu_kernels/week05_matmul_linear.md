@@ -456,7 +456,7 @@ flowchart LR
 7. Tile size 如何同时影响复用和 occupancy？
 8. 为什么 kernel microbenchmark 与模型端到端结果可能不同？
 
-## 参考资料
+## 5.18 参考资料
 
 - NVIDIA CUTLASS：[Efficient GEMM in CUDA](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html)
 - NVIDIA CUTLASS：[GEMM API](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html)

@@ -366,7 +366,7 @@ offline_generate
 -> CUDA kernel
 ```
 
-`auto` 模式允许失败后回退，适合普通运行；严格验收需要 `cuda` 模式或 profiler kernel 证据。否则“输出正确”可能只是 reference 路径正确。
+`auto` 模式允许失败后回退，适合普通运行；严格验证需要 `cuda` 模式或 profiler kernel 证据。否则“输出正确”可能只是 reference 路径正确。
 
 ## 4.14 数学语义与实现边界
 
@@ -401,7 +401,7 @@ Broadcast 只保证运算能执行，不保证 position、seq 和 dim 的语义�
 7. 为什么不缓存 Q，也不对 V 应用标准 RoPE？
 8. RoPE 最容易出现哪些 shape 和配对错误？
 
-## 参考资料
+## 4.16 参考资料
 
 - Zhang 与 Sennrich：[Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)
 - Su 等：[RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864)

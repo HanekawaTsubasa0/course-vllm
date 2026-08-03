@@ -184,7 +184,7 @@ full_length_concurrency = floor(162896/2048) = 79
 
 目标：output tokens/s 与 TPOT。每轮 batch、KV bandwidth、kernel launch 和通信共同限制。
 
-容量报告必须配服务 benchmark：
+容量结论必须同时给出服务 benchmark：
 
 ```text
 能放下多少

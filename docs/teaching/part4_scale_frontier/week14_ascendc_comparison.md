@@ -1,18 +1,18 @@
-# 第 14 章：从 CUDA 到 Ascend C，换硬件后哪些原则不变
+# 第 14 章：CUDA 与 Ascend C 的编程模型和数据流比较
 
-## 本周为什么不强行要求写一个 Ascend Kernel
+## 14.1 暂缓实验开发的环境约束
 
-课程当前没有统一可用的 Ascend 硬件、CANN 版本和 CI。若只复制一段无法运行的样例，学生既不能验证正确性，也不能确认性能与工具链，反而会把“看过 API”误当成“掌握算子开发”。
+课程当前没有统一可用的 Ascend 硬件、CANN 版本和 CI。若只复制一段无法运行的样例，既不能验证正确性，也不能确认性能与工具链，容易把静态阅读 API 误认为已经具备算子开发能力。
 
 因此本章只完成 CUDA 与 Ascend C 的编程模型对照，阅读官方 Add 样例的数据流，不安排 Ascend 硬件实验，也不要求运行或提交 Ascend C kernel。等课程统一确定硬件、CANN 版本和验收环境后，再单独开发实验任务书。
 
-这不是降低技术要求，而是坚持前面课程建立的原则：没有可复现环境，就不伪造运行结论。
+这一安排遵循前文建立的证据原则：没有可复现环境时，只能讨论静态结构和理论机制，不能给出设备正确性或性能结论。
 
 官方文档会持续演进。当前 CANN 文档已同时组织 SIMD、SIMT、TPipe/TQue、静态 Tensor 和多层级 API 等路径，具体名称和支持范围必须以选定版本为准。[Ascend C 8.5 文档结构](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_map_10_0004.html)、[CANN 9.0 编程指南](https://www.hiascend.com/document/detail/zh/canncommercial/900/programug/Ascendcopdevg/atlas_ascendc_10_0060.html)。
 
 ---
 
-## 一、数学不变，执行表达会变
+## 14.2 算子语义与硬件执行表达
 
 同一个 Add：
 
@@ -34,7 +34,7 @@ z[i] = x[i] + y[i]
 
 CUDA 的 grid/block/thread 不是并行计算的唯一表达。学习新后端时，应该寻找这些本质问题的答案，而不是机械寻找 `blockIdx` 的同名替代品。
 
-## 二、Ascend、CANN 与 Ascend C
+## 14.3 Ascend、CANN 与 Ascend C 的层次关系
 
 ### Ascend
 
@@ -57,7 +57,7 @@ cuBLAS/cuDNN             <-> 对应的 CANN 高性能算子能力
 
 类比只用于建立入口，不能推断 API、线程模型或存储层次一一对应。
 
-## 三、异构程序仍分 Host 与 Device
+## 14.4 Host 与 Device 的职责划分
 
 两类平台都需要 host 侧：
 
@@ -82,7 +82,7 @@ flowchart LR
     C --> O["Global memory output"]
 ```
 
-## 四、CUDA 的线程层次回顾
+## 14.5 CUDA 的线程层次与优化对象
 
 ```text
 grid -> blocks -> threads -> warps
@@ -100,7 +100,7 @@ occupancy/registers
 async copy/pipeline
 ```
 
-## 五、Ascend C 不应简化成“另一套 Thread API”
+## 14.6 Ascend C 的多层次编程抽象
 
 Ascend C 文档提供不同抽象层次。常见教学路径强调：
 
@@ -113,11 +113,11 @@ Ascend C 文档提供不同抽象层次。常见教学路径强调：
 
 官方 API 概述说明计算 API 基于 Local Memory 数据工作，数据需要从 Global Memory 搬入、计算、再搬回；API 包含标量、向量、矩阵与高阶 Softmax/Matmul 等能力。[编程 API 概述](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/80RC2alpha002/devguide/opdevg/ascendcopdevg/atlas_ascendc_10_0017.html)
 
-较新文档还包含 AI Core SIMD、SIMT 及混合编程。课程不把任何一种路径宣称为所有版本唯一模型，而是要求学生记录实际 CANN 版本和所选范式。
+较新文档还包含 AI Core SIMD、SIMT 及混合编程。课程不把任何一种路径表述为所有版本中的唯一模型；具体分析必须记录实际 CANN 版本和所选编程范式。
 
-## 六、GlobalTensor 与 LocalTensor 的直觉
+## 14.7 GlobalTensor 与 LocalTensor 的存储语义
 
-可以把它们理解为不同存储层级的 tensor view：
+二者可以理解为面向不同存储层级的 tensor view：
 
 ```text
 GlobalTensor：全局内存中的大数组
@@ -134,7 +134,7 @@ CopyOut: Local -> Global
 
 这与 CUDA “global -> shared/register -> compute -> global”在优化原则上相似：高带宽全局存储容量大，片上存储容量小但适合复用。具体硬件、API 和同步方式不同。
 
-## 七、TPipe 与 TQue 为什么出现
+## 14.8 TPipe 与 TQue 的流水依赖表达
 
 算子通常处理很多 tiles。若严格串行：
 
@@ -169,7 +169,7 @@ TPipe 管理流水中的内存/阶段，TQue 用队列连接阶段并表达同�
 
 不应把 TQue 只理解为普通 CPU 容器；它服务于设备流水与依赖。
 
-## 八、Tiling 解决什么
+## 14.9 Tiling 的任务划分与片上容量约束
 
 输入可能远大于单核片上存储。Tiling 决定：
 
@@ -186,7 +186,7 @@ Host tiling 根据 shape、dtype 和平台信息计算参数，kernel 根据 til
 
 这与 CUDA 选择 grid/block/tile size 的本质问题相通，但 Ascend C 的 host/kernel 接口和 API 不同。
 
-## 九、用 Add 对照两套思路
+## 14.10 Add 算子的跨平台执行映射
 
 ### CUDA 教学版
 
@@ -211,7 +211,7 @@ CopyOut 到 GlobalTensor
 
 两者结果都应对齐同一个 CPU/PyTorch reference。
 
-## 十、边界与对齐仍是核心问题
+## 14.11 边界处理与内存对齐
 
 总长度不一定整除核数或 tile length。需要处理：
 
@@ -225,7 +225,7 @@ CopyIn/Out 合法范围
 
 这与 CUDA 的 boundary guard 同源：并行划分通常向规则 tile 对齐，真实数据边缘不规则。
 
-## 十一、Double Buffer 的共同思想
+## 14.12 Double Buffer 的跨平台流水思想
 
 两组 local buffers：
 
@@ -238,7 +238,7 @@ buffer 1 copy tile n+1
 
 性能收益同样需要 profiler 证据，不能因代码使用 double buffer 就宣布重叠成功。
 
-## 十二、Vector 与 Cube 的方向性理解
+## 14.13 Vector 与 Cube 的计算形态
 
 昇腾 AI Core 面向不同计算形态提供相应执行能力。Elementwise、reduction 与矩阵计算的适合路径不同。
 
@@ -251,7 +251,7 @@ Matmul 需要矩阵计算能力与专门 tiling
 
 不要把 CUDA thread-level 实现逐句翻译到 Ascend C；应重新选择适合目标硬件的 API 和数据流。
 
-## 十三、基础 API 与高阶 API
+## 14.14 基础 API 与高阶 API 的抽象层次
 
 官方文档区分基础 API 和高阶 API：
 
@@ -260,7 +260,7 @@ Matmul 需要矩阵计算能力与专门 tiling
 
 使用高阶 API 不等于“不懂底层”；工程上应在控制力、维护成本、兼容性和性能之间选择。
 
-## 十四、编译、注册与调用链
+## 14.15 编译、注册与运行时调用链
 
 工程化自定义算子通常包含：
 
@@ -284,7 +284,7 @@ launch integration
 reference/test commands
 ```
 
-## 十五、CPU/NPU 调试与上板验证
+## 14.16 CPU/NPU 调试与设备验证的证据层次
 
 官方资料提供 CPU 侧模拟/孪生调试等能力，适合先检查功能；但 CPU 模拟通过不等于 NPU 性能或设备执行全部正确。
 
@@ -300,7 +300,7 @@ Profiler 性能证据
 
 无硬件时只能完成前面的部分，不应写“Ascend kernel 已验证高性能”。
 
-## 十六、怎样对照 RMSNorm
+## 14.17 RMSNorm 的跨平台映射实例
 
 数学：
 
@@ -328,9 +328,9 @@ Global/Local 搬运
 
 相同的是 reduction、累加精度、数据复用和边界；不同的是硬件抽象与表达工具。
 
-## 十七、可移植的性能分析问题
+## 14.18 可移植的性能分析框架
 
-无论后端，都问：
+无论采用何种后端，性能分析都应回答：
 
 1. 算子 FLOPs 与 bytes？
 2. 数据搬了几次？
@@ -343,11 +343,11 @@ Global/Local 搬运
 
 这套问题比记忆某版 API 更持久。
 
-## 十八、阅读官方样例时应观察什么
+## 14.19 官方样例的阅读方法
 
 阅读 Add 或 RMSNorm 样例时，重点追踪 host/device 分工、核间 tiling、Global/Local 数据搬运、计算阶段、尾块边界和编译调用链。没有统一运行环境时，只讨论代码表达的机制，不根据样例推断真实性能，也不把静态阅读写成设备验证结论。
 
-## 十九、对照表
+## 14.20 CUDA 与 Ascend C 对照表
 
 | 问题 | CUDA 教学路径 | Ascend C 对照路径 |
 | --- | --- | --- |
@@ -360,29 +360,29 @@ Global/Local 搬运
 | 编译 | host compiler + nvcc | CANN/Ascend C 编译链 |
 | 调试 | sanitizer/nsys/ncu | CPU/NPU 调试与 Ascend profiler |
 
-## 二十、常见误区
+## 14.21 跨平台类比的适用边界
 
-### Ascend C 是 CUDA 换一套函数名
+### 14.21.1 API 名称不能代表硬件模型等价
 
 硬件架构、并行抽象、存储和工具链不同，应重新设计数据流。
 
-### 无 NPU 也能证明性能
+### 14.21.2 静态分析不能替代 NPU 性能证据
 
 只能做静态/模拟与理论分析，不能声称设备性能。
 
-### 使用高阶 API 就没有技术含量
+### 14.21.3 高阶 API 与底层理解并不冲突
 
 工程需要选择适合的抽象，并理解 tiling、数据和边界。
 
-### 数学相同，kernel 可以直接移植
+### 14.21.4 数学语义相同不代表 Kernel 可直接移植
 
 数学相同只保证目标结果一致，不保证执行映射可复用。
 
-### 某版示例能代表所有 CANN 版本
+### 14.21.5 示例结论受 CANN 版本约束
 
 API 和文档会演进，必须固定版本。
 
-## 二十一、学完本周，应能回答
+## 14.22 本章小结与思考题
 
 1. Ascend、CANN 与 Ascend C 是什么关系？
 2. 为什么不能机械寻找 blockIdx 的同名替代？
@@ -393,7 +393,7 @@ API 和文档会演进，必须固定版本。
 7. 无硬件时能提供哪些证据，不能提供哪些？
 8. 哪些性能分析问题可以跨后端复用？
 
-## 参考与版本说明
+## 14.23 参考资料与版本说明
 
 - [Ascend C 8.5 官方文档结构](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_map_10_0004.html)
 - [Ascend C 官方编程 API 概述](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/80RC2alpha002/devguide/opdevg/ascendcopdevg/atlas_ascendc_10_0017.html)

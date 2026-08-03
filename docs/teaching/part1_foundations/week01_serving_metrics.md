@@ -545,7 +545,7 @@ flowchart LR
 
 这些问题分别检查自回归顺序依赖、阶段划分、状态容量和指标边界。后续章节将在本章术语体系上依次展开 profiling、CUDA 算子、KV 管理、调度和多卡容量。
 
-## 参考资料
+## 1.12 参考资料
 
 - Zhong 等：[DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving](https://www.usenix.org/system/files/osdi24-zhong-yinmin.pdf)
 - Yu 等：[Orca: A Distributed Serving System for Transformer-Based Generative Models](https://www.usenix.org/conference/osdi22/presentation/yu)

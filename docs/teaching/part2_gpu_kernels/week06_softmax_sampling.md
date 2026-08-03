@@ -376,7 +376,7 @@ Greedy 只需 argmax；融合 sampler 也可能避免把完整 probs 写回 glob
 7. 固定 seed 为什么不保证不同 batching 下结果相同？
 8. Sampling 参数为什么可能降低合批机会？
 
-## 参考资料
+## 6.18 参考资料
 
 - PyTorch：[`torch.nn.functional.softmax`](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.softmax.html)
 - PyTorch：[`torch.multinomial`](https://docs.pytorch.org/docs/stable/generated/torch.multinomial.html)

@@ -374,7 +374,7 @@ Cache-aware scheduling 可以：
 - 把 prefix hit 纳入 token budget；
 - 减少重复 prefill。
 
-但过度追求 cache locality 也可能破坏 FIFO 公平性。Week 15 再深入。
+但过度追求 cache locality 也可能破坏 FIFO 公平性。第 15 章将在 cache-aware scheduling 中继续分析这一取舍。
 
 ## 11.17 调度策略的评价指标
 
@@ -445,7 +445,7 @@ KV utilization / fragmentation
 8. 如何证明模型内部真实合批？
 9. Cache-aware scheduling 为什么可能损害公平性？
 
-## 参考资料
+## 11.21 参考资料
 
 - Yu 等：[Orca: A Distributed Serving System for Transformer-Based Generative Models](https://www.usenix.org/conference/osdi22/presentation/yu)
 - Kwon 等：[Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)

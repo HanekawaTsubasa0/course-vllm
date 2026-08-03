@@ -16,7 +16,7 @@
 
 如果不知道 2.4 秒分别花在哪里，就不知道应该改调度器、数据搬运、模型算子，还是根本不该改代码。
 
-本周的目标不是学会点击某个 profiler，而是建立一套不会乱优化的调查方法：
+本章的目标不是记忆某个 profiler 的界面，而是建立一套由观测逐步形成性能结论的分析方法：
 
 ```text
 先定义 workload
@@ -431,7 +431,7 @@ Profiler 本身有开销。它适合定位结构和热点，端到端性能应�
 6. 吞吐提升但 p99 恶化时，应如何评价结果？
 7. 一份可复现性能报告必须记录哪些 workload 条件？
 
-## 参考资料
+## 2.13 参考资料
 
 - NVIDIA：[CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
 - NVIDIA：[Nsight Systems User Guide](https://docs.nvidia.com/nsight-systems/)

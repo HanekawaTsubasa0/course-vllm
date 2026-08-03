@@ -476,7 +476,7 @@ Tensor Core / MMA 使用
 融合 RoPE、cache write 等操作
 ```
 
-课程 kernel 的目标是让数学、地址和 online softmax 可验证，不以超过 FlashAttention、cuDNN 或 vLLM 生产 kernel 为验收标准。
+课程 kernel 的目标是使数学语义、地址映射和 online softmax 可以被逐步验证，不以超过 FlashAttention、cuDNN 或 vLLM 生产 kernel 作为性能评价目标。
 
 ## 7.19 Attention 机制的适用边界
 
@@ -512,7 +512,7 @@ Tensor Core / MMA 使用
 8. FlashAttention 减少了哪些 HBM 中间读写？
 9. Paged KV 为什么不改变 attention 数学？
 
-## 参考资料
+## 7.21 参考资料
 
 - Vaswani 等：[Attention Is All You Need](https://arxiv.org/abs/1706.03762)
 - Ainslie 等：[GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245)

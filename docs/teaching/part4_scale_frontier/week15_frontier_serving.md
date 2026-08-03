@@ -12,7 +12,7 @@
 机制改变了 request、sequence、KV block、batch 还是 worker？
 ```
 
-Week 15 的目标不是复刻一个工业系统，而是学习把论文机制映射到已有课程结构。无论新策略叫什么，都要落到状态、决策、资源和指标。
+本章的目标不是复刻某个工业系统，而是建立把论文机制映射到既有系统结构的方法。无论新策略采用何种名称，都需要落实到状态、决策、资源和指标。
 
 ---
 
@@ -194,7 +194,7 @@ KV_transfer_bytes
 = prompt_tokens * kv_bytes_per_token
 ```
 
-用 Week 13 例子 112 KiB/token，8k prompt：
+沿用第 13 章的例子：若 KV 成本为 112 KiB/token，prompt 长度为 8k，则：
 
 ```text
 112 KiB * 8192 ≈ 896 MiB
@@ -407,7 +407,7 @@ SLO 与多租户公平
 故障注入
 ```
 
-报告必须写这段 gap，避免把排序脚本包装成工业实现。
+技术论证必须说明这些能力差距，避免把演示排序策略误认为完整的工业实现。
 
 ## 15.17 前沿机制结论的适用边界
 
@@ -455,6 +455,6 @@ KV transfer、双队列和协调可能抵消收益。
 - Agrawal et al.：[Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve](https://arxiv.org/abs/2403.02310)
 - Leviathan et al.：[Fast Inference from Transformers via Speculative Decoding](https://arxiv.org/abs/2211.17192)
 - DeepSeek-AI：[DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model](https://arxiv.org/abs/2405.04434)
-- 课程工程：policies、cache-aware demo 与 Week 15 paper-to-system 模板
+- 课程工程：policies、cache-aware demo 与 paper-to-system 分析模板
 
 正文、模型、图示和最小实验均为课程原创组织。前沿机制随论文与系统版本变化，报告应引用具体论文/实现版本，并明确教学近似与生产能力的差距。

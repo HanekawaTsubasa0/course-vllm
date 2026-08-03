@@ -49,7 +49,7 @@ flowchart LR
 
 ### 9.2.3 Scheduler
 
-决定本轮哪些 sequence prefill/decode。Week 09 先关注单请求状态；Week 11 再展开多请求调度。
+决定本轮哪些 sequence 执行 prefill 或 decode。第 9 章先建立单请求状态，第 11 章再展开多请求调度。
 
 ### 9.2.4 Backend
 
@@ -389,11 +389,11 @@ sample/update sequences
 release finished
 ```
 
-Week 09 要把 sequence 状态做正确，Week 11 才能安全地改变选择顺序。
+第 9 章需要先保证 sequence 状态正确，第 11 章才能在不破坏生命周期的前提下改变选择顺序。
 
 ## 9.15 请求生命周期的 Profiling 边界
 
-本周建立单请求基线：
+本章建立单请求基线：
 
 ```text
 encode
@@ -406,7 +406,7 @@ release
 
 不要为了计时在每个 CUDA op 后同步。可以用 profiler range 标注阶段，再观察真实异步 timeline。
 
-基线要固定 prompt、output tokens、dtype、backend 和 sampling，作为 Week 10/11 更换 cache/调度后的对照。
+基线需要固定 prompt、output tokens、dtype、backend 和 sampling，作为第 10、11 章更换 cache 与调度机制后的对照。
 
 ## 9.16 请求状态机测试矩阵
 
@@ -477,7 +477,7 @@ API 中通常指生成 token 数；模型上下文上限是另一约束。
 8. Batch 重排后怎样恢复原请求顺序？
 9. 哪些测试能证明状态机没有泄漏？
 
-## 参考资料
+## 9.19 参考资料
 
 - vLLM：[Architecture Overview](https://docs.vllm.ai/en/latest/design/arch_overview.html)
 - vLLM：[Engine API](https://docs.vllm.ai/en/latest/api/vllm/index.html)

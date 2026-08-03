@@ -374,7 +374,7 @@ KV Cache 的理论依据是因果注意力中的历史位置不会因追加未�
 
 缓存容量由层数、KV head 数、head dimension、dtype 和所有活跃序列的有效长度共同决定。GQA 减少的是实际保存与读取的 KV heads。课程工程使用按 sequence、layer 保存的动态连续缓存，结构清楚但会因 `torch.cat` 复制历史数据，并要求等长序列才能直接合批。这些限制构成后续学习请求生命周期、paged KV Cache 和 continuous batching 的必要前提。
 
-## 思考题
+## 8.15 思考题
 
 1. 对一个 32 层、8 个 KV heads、head dimension 为 128、KV dtype 为 FP16 的模型，单 token KV 容量是多少？四个有效长度分别为 512、1024、2048、4096 的请求共需多少有效 KV 数据？
 2. 为什么因果掩码能够保证历史 K/V 可复用？若把 self-attention 改为双向注意力，这一论证在哪一步失效？
@@ -384,7 +384,7 @@ KV Cache 的理论依据是因果注意力中的历史位置不会因追加未�
 6. 当前课程 dense 路径为什么可能在一次 decode 中复制两次历史 K/V？请沿 `Qwen3Attention.forward`、`_store_cache` 和 `ContinuousKVCache.append` 给出调用链。
 7. Padding、length bucketing 与 paged metadata 分别把复杂性放在了存储、调度还是 kernel 寻址的哪一侧？
 
-## 参考资料
+## 8.16 参考资料
 
 - Vaswani 等：[Attention Is All You Need](https://arxiv.org/abs/1706.03762)
 - Ainslie 等：[GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245)
