@@ -1,141 +1,420 @@
-# Week 08: KV Cache
+# Week 08：KV Cache，把重复计算换成可管理的状态
 
-## 1. 本周核心问题
+## 没有 Cache 时，模型会重复算什么
 
-自回归生成每次只多生成一个 token，但这个 token 需要看见前面所有历史。KV cache 的目标就是保存历史 token 在 attention 中产生的 K/V，避免每一步都重新计算整段上下文。
+假设 prompt 长度 `L=1000`，接下来生成 100 个 token。
 
-本周先学习最容易理解的连续 KV cache：每个 sequence 的 K/V 沿 token 维连续增长。更复杂的分块和分页管理放到后面学习。
-
-## 2. 背景知识：为什么没有 KV cache 会很慢
-
-自回归生成第 t 步需要看前面所有 token。如果没有 KV cache，每一步都要把完整上下文重新送进模型，重新计算所有历史 token 的 K/V。
-
-假设 prompt 长度是 `L`，要生成 `T` 个 token。没有 cache 时，第 1 步处理 `L` 个 token，第 2 步处理 `L+1` 个 token，第 T 步处理 `L+T-1` 个 token。大量历史计算被重复。
-
-有 KV cache 后：
+如果每一步都把完整上下文重新送进模型：
 
 ```text
-prefill: 计算 prompt 的 K/V 并缓存
-decode step: 只计算新 token 的 K/V，读取历史 K/V
+第 1 步处理 1000 tokens
+第 2 步处理 1001 tokens
+...
+第 100 步处理 1099 tokens
 ```
 
-这把 decode 的重复计算大幅减少。
-
-可以用一个小例子理解。prompt 长度是 3，要继续生成 3 个 token：
+总 token-forward 数：
 
 ```text
-没有 KV cache:
-step 1 计算 [prompt 3 tokens]
-step 2 重新计算 [prompt 3 tokens + generated 1 token]
-step 3 重新计算 [prompt 3 tokens + generated 2 tokens]
-
-有 KV cache:
-prefill 计算并保存 prompt 3 tokens 的 K/V
-step 1 只计算新 token 的 Q/K/V，并读取已有 K/V
-step 2 只计算新 token 的 Q/K/V，并读取已有 K/V
-step 3 只计算新 token 的 Q/K/V，并读取已有 K/V
+1000 + 1001 + ... + 1099
+= 100 * (1000 + 1099) / 2
+= 104,950
 ```
 
-注意：KV cache 不会消除 attention 对历史 K/V 的读取。它减少的是“重新为历史 token 计算 K/V”的成本。随着上下文变长，decode attention 仍然要读越来越长的历史 K/V，所以 KV cache 同时带来加速和显存/带宽压力。
+其中绝大多数是历史 token 的重复计算。
 
-## 3. 原理详解：KV cache 存什么
-
-每个 transformer layer 都有自己的 attention。每层都要保存历史 token 的 K/V。
-
-一个 cache 可以概念化为：
+使用 KV cache 后：
 
 ```text
-cache[sequence_id][layer_id] = (key, value)
+prefill: 1000 tokens
+后续 decode: 每步只计算 1 个新 token
+总计约 1099 token-forwards
 ```
 
-key/value 的常见 shape：
+注意，decode 的 Attention 仍要读取历史 K/V，所以成本不会变成常数；省掉的是历史 token 的 Q/K/V projection、MLP 等重复 forward。
+
+KV cache 不是单纯的模型优化。它把原本无状态的 forward 变成了有状态服务：每个请求都拥有会增长、必须被追踪和释放的 GPU 数据。这正是后面分页管理和调度问题的起点。
+
+---
+
+## 一、为什么缓存 K 和 V，不缓存整个 Hidden State
+
+Decode 新 token 的 query 要与所有历史 key 打分，并用权重汇总历史 value：
 
 ```text
-key:   [batch, num_kv_heads, seq_len, head_dim]
-value: [batch, num_kv_heads, seq_len, head_dim]
+score = q_new K_history^T / sqrt(D)
+out   = softmax(score) V_history
 ```
 
-对于单个 sequence，`seq_len` 会随着生成增长。
+历史 token 的 K/V 在生成过程中不再变化，适合复用。旧 query 只服务于旧位置当时的查询，下一步会产生新 query，因此不需要缓存。
 
-更完整地说，每生成一个新 token，每一层都会产生一份新的 K 和 V。假设有 `num_layers` 层，那么一个 token 不是只占一份 cache，而是在每一层都占一份 K/V。也正因为如此，KV cache 的显存成本会随层数、KV head 数、head_dim、token 数线性增长。
+缓存完整 hidden states 并不能直接替代 K/V：Attention 仍需重复执行 K/V projection。缓存投影后的 K/V 正好位于 decode 所需边界。
 
-K 和 V 的含义也不同：
+## 二、每层都需要自己的 KV Cache
 
-- K, key: 用来和当前 query 计算相似度，决定注意力权重。
-- V, value: 根据注意力权重被加权求和，形成输出内容。
+Transformer 第 0 层和第 20 层产生的 K/V 不相同。每层 attention 都要读取该层自己的历史，所以 cache 带有 layer 维。
 
-decode 时当前 token 会产生 query，然后这个 query 会和历史所有 key 打分，再用权重汇总历史 value。
-
-## 4. 原理详解：KV cache 的显存成本
-
-KV cache 的显存成本通常近似：
+概念形状：
 
 ```text
-num_tokens
-* num_layers
-* 2
-* num_kv_heads
-* head_dim
-* dtype_bytes
+K [num_layers, num_kv_heads, seq_len, head_dim]
+V [num_layers, num_kv_heads, seq_len, head_dim]
 ```
 
-其中 `2` 是 K 和 V。这个公式非常重要，因为它解释了为什么长上下文和高并发会迅速吃掉显存。
+实现中也可能把 batch/sequence、token、head 的维度调整顺序，以适应 kernel 访问。Shape 布局可以变化，语义不能变化：给定 sequence、layer、token position、KV head 和 head_dim，必须找到唯一 K/V。
 
-KV cache 是 LLM serving 的核心资源之一。很多 serving 系统的容量上限不是权重，而是 KV cache。
+### MHA 与 GQA 的影响
 
-还要注意 batch 内请求长度不同。一个 batch 里可能有的 sequence 长度是 128，有的是 2048。attention 读取 K/V 时不能简单假设所有 sequence 有相同历史长度，否则短请求会读到无效位置，长请求会被截断。
+KV cache 使用 `num_kv_heads`，不是 `num_q_heads`。GQA/MQA 通过减少 KV heads 降低存储与带宽。
 
-因此 KV cache 通常要同时维护两类信息：
+如果 Q heads=32，KV heads=8，则四个 Q heads 共享一个 KV head；cache 只保存 8 组 K/V。
 
-- K/V tensor 本身。
-- 每个 sequence 当前有效长度。
+## 三、显存公式再算一次，但这次关注变量
 
-有效长度决定 decode attention 该读多少历史 token，也决定新 K/V 应该 append 到哪里。
-
-显存估算时要注意几个常见误区。
-
-第一，batch size 不是唯一因素。一个 batch 里 8 个短请求和 8 个长请求的 KV cache 成本完全不同。
-
-第二，prompt token 和 generated token 都占 KV cache。长 prompt 本身就会在 prefill 后占用大量 cache，不是只有生成出来的 token 才占 cache。
-
-第三，GQA/MQA 会影响 KV cache 大小。如果 `num_kv_heads` 小于 `num_heads`，KV cache 会比普通多头 attention 更省。
-
-第四，dtype 会直接影响容量。FP16/BF16 通常是 2 bytes，FP32 是 4 bytes，KV cache 量化则可能进一步降低 bytes。
-
-## 5. 原理详解：KV cache 生命周期
-
-KV cache 的生命周期包括：
-
-1. prefill 创建 cache。
-2. decode 每步 append 新 K/V。
-3. attention 每步读取历史 K/V。
-4. 请求结束时 release。
-
-如果 release 失败，服务运行一段时间后显存会被已结束请求占满。在线 serving 系统必须严肃处理 cache 生命周期。
-
-连续 KV cache 的一个朴素实现是每次 append 时做 concat：
+单 token KV bytes：
 
 ```text
-old: [num_heads, old_len, head_dim]
-new: [num_heads, 1, head_dim]
-cat -> [num_heads, old_len + 1, head_dim]
+bytes_per_token
+= num_layers * 2 * num_kv_heads * head_dim * dtype_bytes
 ```
 
-这种实现容易理解，但频繁 concat 会带来内存分配和拷贝开销。真实系统通常会预分配、分块或使用 paged KV 来避免每步搬移历史数据。
+总占用：
 
-生命周期里最重要的是“所有权”。一个 sequence 的 cache 只能在它还需要继续生成时保留；一旦请求完成，系统必须知道哪些 cache 属于它，并释放这些资源。如果多个请求共享 prefix cache，那么释放还要看引用计数，不能简单地请求结束就删除共享块。
+```text
+KV_total
+= bytes_per_token * sum(sequence_context_lengths)
+```
 
-连续 KV cache 容易理解，但它把 sequence 的历史放在连续空间里。这个假设在教学上清楚，在高并发服务中却会带来扩容和碎片问题。后续 Paged KV 会把这个连续空间拆成固定大小 block，让逻辑连续和物理连续解耦。
+这里没有 `num_q_heads`，也没有 vocab size。最敏感变量是：
 
-## 6. 本节小结
+- layers；
+- KV heads；
+- head dimension；
+- dtype；
+- 所有活跃请求的总上下文 token 数。
 
-连续 KV cache 的主要问题不是数学公式，而是生命周期。一个请求结束后必须释放 cache；一个请求继续 decode 时必须接着原来的位置追加；batch 内不同请求长度不同，不能把它们的历史长度混在一起。
+### 为什么平均长度不够
 
-复习本节时要抓住四个动作：
+两个系统都平均 2k context：
 
-- create: prefill 后为 prompt 建立历史 K/V。
-- append: 每个 decode step 把新 token 的 K/V 加到末尾。
-- read: attention 根据有效长度读取历史 K/V。
-- release: 请求完成后释放不再需要的 cache。
+```text
+系统 A：所有请求都约 2k
+系统 B：大量 128-token 请求 + 少数 32k 请求
+```
 
-学完本节后，应能解释 KV cache 为什么能减少重复计算、为什么会消耗大量显存、为什么每个 sequence 必须维护自己的有效长度，以及为什么请求结束后必须释放 cache。
+总 token 相同则理论 KV 总量相近，但调度、公平性、单请求 block 数和尾延迟可能完全不同。容量规划既要看总量，也要看长度分布。
+
+## 四、KV Cache 的四段生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> Prefill: 创建 sequence
+    Prefill --> Cached: 写入 prompt K/V
+    Cached --> Decode: 读取历史并计算新 K/V
+    Decode --> Cached: append 1 token K/V
+    Cached --> Finished: EOS / stop / length / abort
+    Finished --> Released: 释放 cache
+    Released --> [*]
+```
+
+### Prefill：创建
+
+模型一次处理 prompt，得到每层 K/V。Cache manager 创建 handle，把这批 K/V 与 sequence ID 关联。
+
+### Decode：读取
+
+Backend 根据 handle 取得历史 K/V 和有效长度，构造当前 token 的 position，执行 attention。
+
+### Decode：Append
+
+新 token 的 K/V 写到逻辑位置 `current_length`，然后长度加 1。
+
+### Finish：Release
+
+无论正常 EOS、长度限制、客户端取消还是异常，请求终止后都要释放。只在正常返回路径 release 会造成异常请求泄漏。
+
+## 五、Handle 与 Metadata 为什么必要
+
+上层 engine 不应该持有巨大 K/V tensor 并了解布局细节。它可以持有轻量 handle：
+
+```text
+sequence_id
+current_length
+capacity 或 block metadata
+cache backend identity
+```
+
+Backend 根据 handle 找到真实 cache。
+
+这种分离带来两个好处：
+
+- Engine 管理请求生命周期，不依赖 K/V 具体布局；
+- Dense cache 可以在 Week 10 替换为 paged cache，而上层接口变化较小。
+
+但 handle 不是普通整数就万事大吉。必须防止：
+
+```text
+使用已释放 handle
+把 A 请求 handle 传给 B
+长度 metadata 与实际写入不一致
+跨 device/backend 混用
+```
+
+## 六、连续 KV Cache 的最直观实现
+
+单 sequence、单层：
+
+```text
+K [Hkv, current_len, D]
+V [Hkv, current_len, D]
+```
+
+Prefill 写入 `[0:L)`，decode 每步在末尾 append。
+
+```mermaid
+flowchart LR
+    P["Prompt K/V\npositions 0..L-1"] --> C["连续 cache"]
+    N1["decode token 1 K/V"] --> A1["append at L"]
+    A1 --> C
+    N2["decode token 2 K/V"] --> A2["append at L+1"]
+    A2 --> C
+```
+
+连续布局的优点是容易理解、dense attention 读取方便；缺点是增长和不同长度 batch 的管理不灵活。
+
+## 七、每步 torch.cat 为什么隐藏了 O(T²) 搬运
+
+朴素 append：
+
+```python
+cache = torch.cat([cache, new_kv], dim=token_dim)
+```
+
+`cat` 通常需要分配新 tensor，再复制全部旧数据和新数据。
+
+生成 T 个 token 时，复制历史长度：
+
+```text
+L + (L+1) + ... + (L+T-1)
+```
+
+又形成随 T 二次增长的搬运。虽然没有重复模型计算，却在重复搬 cache。
+
+### 预分配
+
+可以预先分配 `[max_len]`，每步原地写：
+
+```text
+cache[..., current_len, :] = new_kv
+current_len += 1
+```
+
+这样避免历史搬运，但要决定预留多大：
+
+- 太小会溢出或扩容；
+- 按最大长度预留会浪费；
+- 多请求连续大块会产生碎片。
+
+Paged KV 正是在“避免 concat”与“避免最大长度连续预留”之间寻找更好的管理方式。
+
+## 八、Position ID 必须与 Cache 长度一致
+
+Decode 新 token 的 position 通常是历史有效长度：
+
+```text
+position_id = current_len
+```
+
+如果 prompt 长 100，新 token 应使用 position 100（从 0 开始）。Cache 写入位置、RoPE position 和 context_len 必须一致。
+
+常见 off-by-one：
+
+```text
+先 length++ 再取 position
+采样 token 已 append 到 token list，但 K/V 尚未写入
+prefill 是否包含最后 prompt token 的定义不一致
+```
+
+这类错误不会总是崩溃，而会让生成逐步偏离 reference。
+
+## 九、不同历史长度为什么难以 Dense Batch
+
+三个请求：
+
+```text
+A context=128
+B context=512
+C context=129
+```
+
+若 K/V 以 dense batch tensor 拼接，需要统一 token dimension。可以 padding 到 512：
+
+```text
+A/C 大量无效位置
+```
+
+还要提供 mask/context_len，保证 attention 不读取 padding。
+
+另一种教学方案是按历史长度分桶：
+
+```text
+bucket 128: A
+bucket 129: C
+bucket 512: B
+```
+
+同长度容易 stack，但会产生许多小 batch，降低合批效率。
+
+Paged decode 可以通过 block table 和 context_lens 让同一 batch 中的序列拥有不同历史长度，但 kernel 寻址更复杂。
+
+## 十、Cache 与 Batch 的边界
+
+Engine 可能一次 prefill/decode 多个 sequence，但每个 sequence 仍需独立状态：
+
+```text
+seq_id
+effective length
+K/V ownership
+finish state
+```
+
+不能因为当前合成一个 batch，就把多个请求永久绑定成一个 cache。A 提前结束时应释放 A，不影响 B/C 继续增长。
+
+```mermaid
+sequenceDiagram
+    participant E as Engine
+    participant C as Cache Manager
+    participant M as Model
+    E->>M: prefill A/B
+    M->>C: store A/B K/V，返回 handles
+    E->>M: decode A/B with handles
+    M->>C: fetch history + append new K/V
+    Note over E: A reaches EOS
+    E->>C: release A handle
+    E->>M: continue decode B
+```
+
+## 十一、正确性怎样验证
+
+### Full Forward 与 Cached Decode 对齐
+
+对 token 序列：
+
+```text
+[x0,x1,x2,x3]
+```
+
+路径 A：一次 full forward。
+
+路径 B：prefill `[x0,x1]`，再 cached decode `x2`、`x3`。
+
+比较对应位置 logits。浮点执行顺序可能产生小误差，但结果应在合理容差内。
+
+### Cache 内容检查
+
+使用小 shape 和可识别值，确认：
+
+- prefill 写入正确 token 位置；
+- append 只改变新位置；
+- 旧 K/V 未被覆盖；
+- K/V、layer、head 没有互换；
+- length 与实际内容一致。
+
+### Release
+
+释放后 fetch 应明确失败；重复 release 的语义要定义清楚，不能静默释放其他请求资源。
+
+## 十二、异常路径与资源安全
+
+实际请求可能在任何阶段失败：
+
+```text
+tokenizer error
+prefill OOM
+客户端断开
+stream consumer 取消
+sampling exception
+decode kernel error
+```
+
+Cache release 应放在可靠的 finally/生命周期管理中。资源泄漏测试可以反复创建、生成、取消请求，并确认 cache usage 回到基线。
+
+## 十三、KV Cache 不等于 Prefix Cache
+
+- **KV cache**：单个活跃 sequence 在 decode 中复用自己的历史 K/V；
+- **Prefix cache**：不同请求之间复用相同完整前缀的 KV block。
+
+前者是自回归生成的基础，后者是跨请求复用优化。Prefix caching 还需要 hash、引用计数和 eviction，留到 Week 10/15。
+
+## 十四、本周实验
+
+### 实验 1：重复工作计算
+
+对给定 L/T，计算无 cache 与有 cache 的 token-forward 数，说明 cache 省掉什么、没有省掉什么。
+
+### 实验 2：Shape 表
+
+记录每层 prefill K/V、单步 new K/V、handle 和 batch decode 输入 shape。
+
+### 实验 3：连续 Append
+
+用小 tensor 连续 append 多个 token，检查 length、旧数据和新位置。
+
+### 实验 4：Full vs Cached
+
+对齐多个 decode step logits，记录 max/mean error。
+
+### 实验 5：不同长度 Batch
+
+构造三种 context length，观察 padding 或 length bucketing，说明各自浪费。
+
+### 实验 6：Release 与取消
+
+模拟正常完成和异常取消，确认 cache usage 恢复。
+
+## 十五、常见误区
+
+### KV Cache 让 Decode 变成 O(1)
+
+它省掉历史 token 的重复 forward，但当前 query 仍要读取历史 K/V；Attention 成本随 context 增长。
+
+### Cache 只需保存最后一层
+
+每层 attention 都需要自己的历史 K/V。
+
+### torch.cat 只是修改指针
+
+通常要分配并复制完整旧 tensor，每步 cat 会造成大量搬运。
+
+### Batch 中可以共享一个 length
+
+不同请求历史长度不同，必须独立维护有效长度。
+
+### 请求返回后 Python 对象销毁就一定释放 GPU Cache
+
+显式 cache manager 可能仍持有引用或物理块；生命周期必须明确 release。
+
+### KV Cache 与 Prefix Cache 是同一个概念
+
+KV cache 是请求内历史复用，prefix cache 是请求间前缀复用。
+
+## 十六、学完本周，应能回答
+
+1. KV cache 省掉了哪些重复计算？
+2. 为什么缓存 K/V 而不是 Q？
+3. 每 token KV bytes 由哪些模型参数决定？
+4. Cache handle 需要哪些 metadata？
+5. 每步 cat 为什么产生二次增长的搬运？
+6. Position ID、cache length 和写入 slot 为什么必须一致？
+7. 不同历史长度为什么让 dense batch decode 困难？
+8. Cache release 应覆盖哪些异常路径？
+9. KV cache 与 prefix cache 有何区别？
+
+## 参考与素材说明
+
+- 猛猿：[vLLM V1：KV Cache 初始化](https://zhuanlan.zhihu.com/p/1900932850829730567)
+- 猛猿：[PagedAttention 原理](https://zhuanlan.zhihu.com/p/691038809)
+- 猛猿：[再读 MLA](https://zhuanlan.zhihu.com/p/19585986234)
+- 课程工程：ContinuousKVCache、Qwen3 continuous backend 与 Week 08 grader
+
+本文的复杂度计算、生命周期图、连续缓存例子和实验均为课程原创组织。Paged KV 和 prefix caching 只作为后续动机出现，不提前替代本周的连续缓存主线。

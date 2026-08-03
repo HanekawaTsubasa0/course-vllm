@@ -1,184 +1,432 @@
-# Week 10: Paged KV 与 Block Manager
+# Week 10：Paged KV，把逻辑连续与物理连续分开
 
-## 1. 本周核心问题
+## 连续 Cache 为什么在高并发下变得难管理
 
-KV cache 让 decode 不必反复计算历史 token，但它也带来新的问题：历史越长，占用显存越多；并发请求越多，显存分配越复杂。如果每个请求都要求一段连续显存，系统很快会遇到浪费、碎片和扩容困难。
+Week 08 的连续 KV cache 很直观：一个请求的 token 0、1、2……按顺序放在一段连续显存中。问题是请求最终长度事先未知。
 
-本周要回答四个问题：
+如果按最大长度预留，短请求浪费大量空间；如果每步扩容，会搬运历史数据；如果为不同长度申请不同连续块，请求陆续结束后会留下大小不一的空洞。
 
-- 为什么连续 KV cache 在高并发 serving 中不够好？
-- Paged KV 为什么要借鉴操作系统里的分页思想？
-- block table 和 slot mapping 如何把“逻辑 token 位置”翻译成“物理显存位置”？
-- prefix cache 为什么只能安全复用完全相同的前缀？
-
-## 2. 背景知识：连续 KV cache 的问题
-
-先回忆 KV cache 的基本用途：每生成一个新 token，模型会为这个 token 在每一层 attention 中计算 K 和 V，并把它们保存下来。后续 token 做 attention 时，需要读取前面所有 token 的 K/V。也就是说，KV cache 的长度会随着生成过程不断增长。
-
-如果每个请求都需要一段连续 KV cache，系统会遇到几个问题。
-
-第一，预分配浪费。请求最终生成多长不确定。如果按最大长度预分配，大量空间不用。
-
-第二，动态增长困难。decode 每步增长一个 token，如果底层 tensor 需要不断 concat 或搬移，开销很大。
-
-第三，碎片。请求长度不同、结束时间不同，显存里会出现很多大小不一的空洞。
-
-第四，并发请求之间很难复用。很多请求可能共享同一个 system prompt 或文档前缀，但如果 KV cache 只是一整段连续空间，就不容易把相同前缀拆出来独立复用。
-
-Paged KV 的思想就是借鉴虚拟内存分页：逻辑上连续，物理上分块。操作系统里，进程看到的虚拟地址空间可以是连续的，但真实物理内存可以分散在不同页框中。Paged KV 也是类似思想：一个 sequence 看到的 token position 是连续的，但真实 K/V 可以放在不同物理 block 里。
-
-这个类比很重要，但不能混淆：
-
-- 操作系统分页管理的是通用内存地址。
-- Paged KV 管理的是 attention 要读写的 K/V 张量位置。
-- 操作系统通过页表做虚拟地址到物理地址的翻译。
-- Paged KV 通过 block table 做 logical block 到 physical block 的翻译。
-
-## 3. 原理详解：Block table
-
-把 KV cache 切成固定大小 block。例如 block size 是 16，逻辑 token 0-15 在 logical block 0，16-31 在 logical block 1。
-
-block table 保存：
+Paged KV 的核心不是让 Attention 数学更快，而是改变 KV cache 的内存管理：
 
 ```text
-logical_block_id -> physical_block_id
+逻辑上：一个 sequence 的 token 仍然连续编号
+物理上：KV 可以放进任意空闲固定大小 block
+中间：block table 完成地址翻译
 ```
 
-访问某个 token position 时：
+它借鉴虚拟内存分页，但不是操作系统分页的逐项复制。我们使用这个类比理解“逻辑地址与物理地址解耦”，具体分配、hash 和 kernel 都由 serving 系统实现。
+
+---
+
+## 一、五个必须分清的概念
+
+### Logical Token Position
+
+Token 在某条 sequence 中的位置，例如 0..36。它不关心 KV 实际放在哪。
+
+### Logical Block
+
+固定 `block_size` 个逻辑 token 为一组：
 
 ```text
 logical_block = position // block_size
+```
+
+### Offset
+
+Token 在逻辑 block 内的位置：
+
+```text
 offset = position % block_size
-physical_block = block_table[logical_block]
+```
+
+### Physical Block
+
+物理 KV pool 中真正分配的 block ID。Logical block 2 不要求放在 physical block 2。
+
+### Physical Slot
+
+物理 block 内具体 token 槽：
+
+```text
 slot = physical_block * block_size + offset
 ```
 
-attention kernel 根据 slot 找到 K/V。
+最终 K/V tensor 用 slot 找到物理位置。
 
-block table 的意义是把“逻辑连续”和“物理连续”解耦。对模型来说，一个 sequence 的历史 token 仍然是 0、1、2、3 这样连续增长；对显存管理来说，这些 token 可以散落在不同物理 block 中。只要 block table 能把逻辑位置翻译成物理位置，attention 就能读到正确 K/V。
+## 二、完整地址转换例子
 
-举一个具体例子。假设 block size 是 4，一个请求已经有 10 个 token，那么逻辑上它占用：
+设：
 
 ```text
-logical block 0: token 0, 1, 2, 3
-logical block 1: token 4, 5, 6, 7
-logical block 2: token 8, 9
+block_size = 4
+block_table = [7, 2, 9]
 ```
 
-如果物理 block 分配结果是：
+含义：
 
 ```text
-logical block 0 -> physical block 12
-logical block 1 -> physical block 7
-logical block 2 -> physical block 30
+logical block 0 -> physical block 7
+logical block 1 -> physical block 2
+logical block 2 -> physical block 9
 ```
 
-那么 token 6 的位置计算是：
+访问逻辑 token position=6：
 
 ```text
-position = 6
 logical_block = 6 // 4 = 1
-offset = 6 % 4 = 2
-physical_block = block_table[1] = 7
-slot = 7 * 4 + 2 = 30
+offset        = 6 % 4  = 2
+physical_block = block_table[1] = 2
+slot = 2 * 4 + 2 = 10
 ```
 
-这里的 slot 可以理解为“在所有物理 KV block 展平以后，第几个 token 槽位”。真正的 K/V 张量通常还会有 layer、head、head_dim 等维度，所以完整访问还要加上这些维度：
+因此 position 6 的 K/V 位于物理 slot 10。
+
+```mermaid
+flowchart LR
+    P["position=6"] --> L["logical block=1\noffset=2"]
+    L --> T["block_table[1]=2"]
+    T --> S["physical slot=10"]
+    S --> K["K/V cache[layer,slot,...]"]
+```
+
+如果直接用 `position=6` 当物理 slot，就完全绕过 block table，分页机制失效。
+
+## 三、物理 Cache Shape
+
+一种概念布局：
 
 ```text
-K[layer, physical_block, offset, kv_head, head_dim]
-V[layer, physical_block, offset, kv_head, head_dim]
+K/V [num_layers, num_blocks*block_size, num_kv_heads, head_dim]
 ```
 
-初学时最容易错的是把 `position`、`logical_block`、`physical_block`、`offset` 混成一个概念。它们分别回答不同问题：
-
-- `position`: 这是 sequence 里的第几个 token。
-- `logical_block`: 这个 token 属于这个 sequence 的第几个逻辑块。
-- `physical_block`: 这个逻辑块实际被放到显存里的哪个物理块。
-- `offset`: 这个 token 在块内部的偏移。
-
-## 4. 原理详解：Paged KV 的收益和代价
-
-Paged KV 带来几个好处：
-
-- 按需分配 block，减少预分配浪费。
-- 请求结束后 block 可以回收。
-- 每个 sequence 的 KV 在逻辑上连续，物理上可以分散在多个 block 中。
-- prefix cache 可以复用相同 prompt 的完整 block。
-
-代价是：
-
-- 需要 block table metadata。
-- attention kernel 访问 K/V 时多一次间接寻址。
-- block size 选择会影响碎片和调度开销。
-
-block size 是一个重要 tradeoff。block 太大，最后一个 block 可能浪费很多未使用 slot，内部碎片更严重；block 太小，block table 更长，metadata 和寻址开销更大，kernel 访问也可能更复杂。
-
-例如 block size 为 16 时，一个 17 token 的 sequence 需要 2 个 block，其中第二个 block 只用了 1 个 token，浪费 15 个 slot。block size 为 4 时，同样 17 token 需要 5 个 block，只浪费 3 个 slot，但 block table 更长。
-
-因此 block size 不是越小越好，也不是越大越好。它要在碎片、metadata、kernel 访存模式和调度复杂度之间折中。
-
-还要区分两类碎片：
-
-- 内部碎片：已经分配的 block 里有一部分 slot 没有使用，例如最后一个 block 没填满。
-- 外部碎片：系统里有很多零散空洞，虽然总空闲空间不少，却难以满足连续大块分配。
-
-Paged KV 主要缓解外部碎片，因为它不要求一个 sequence 的所有 KV 连在一起；但它会引入内部碎片，因为每个 sequence 的最后一个 block 可能没有填满。
-
-Paged KV 还要求系统维护 free block list。可以把它想成一个“空闲物理 block 池”：
+也可以显式保留 block 维：
 
 ```text
-新 token 需要写入，但当前最后一个 block 满了
--> 从 free block list 取一个 physical block
--> 写入 block table
--> 后续 attention 通过 block table 找到它
-
-请求结束
--> 找到它独占的 physical block
--> 清理引用关系
--> 放回 free block list
+K/V [num_layers, num_blocks, block_size, num_kv_heads, head_dim]
 ```
 
-这个流程看起来像内存管理，而不是矩阵计算。它说明 LLM serving 不只是模型数学问题，也包含显存资源管理问题。
+两者可以通过 reshape 对应。Kernel 选择哪种布局取决于访存和向量化；BlockManager 只需要提供正确物理 block/slot。
 
-## 5. 原理详解：Prefix cache
+## 四、Block Table 属于谁
 
-很多 serving workload 有共享前缀。例如同一个 system prompt、同一个文档前缀、同一个工具描述。prefix cache 通过 hash 完整 block 的 token，把相同前缀的 KV block 复用。
-
-prefix cache 必须处理引用计数。多个 sequence 共享一个 block 时，不能因为其中一个请求结束就释放物理 block。
-
-prefix cache 只在“前缀完全相同”时可靠。原因是 KV cache 不是普通文本缓存，它保存的是模型每一层对历史 token 的中间状态。如果 token 序列有一个位置不同，后续 attention 状态就不能直接复用。
-
-为什么强调“前缀”？因为因果语言模型中，第 t 个 token 的 hidden state 只能看见 0 到 t 的历史。如果两个请求前 128 个 token 完全相同，那么这 128 个位置在每一层产生的 K/V 也是相同的，可以被复用。可是如果第 10 个 token 不同，那么从第 10 个位置开始，后续 hidden state 都可能不同，后面的 KV 就不能直接共享。
-
-prefix cache 通常按 block 粒度复用，而不是按任意 token 粒度复用。原因是 block 粒度更容易管理：
-
-- block table 本来就按 block 记录映射。
-- 引用计数按 block 维护比较简单。
-- 完整 block 的 hash 更容易作为 cache key。
-- 释放时可以直接按 block 回收。
-
-一个常见过程如下：
+每条 sequence 有自己的 block table：
 
 ```text
-请求 A: tokens [a, b, c, d, e, f, g, h]
-block size = 4
-
-block 0 的 token 是 [a, b, c, d]
-block 1 的 token 是 [e, f, g, h]
-
-请求 B: tokens [a, b, c, d, x, y]
-
-请求 B 的 block 0 和请求 A 完全相同，可以复用
-请求 B 后面的 token 不同，需要新算新分配
+seq A: [7,2,9]
+seq B: [4,1]
 ```
 
-prefix cache 的收益也不是免费的。系统需要保存 hash 表、引用计数和淘汰策略。如果 cache 永远不淘汰，显存会被旧 prefix 占满；如果淘汰太激进，又会降低命中率。因此 prefix cache 也是一个调度和资源管理问题。
+Logical block ID 只在 sequence 内有意义。A 的 logical block 0 和 B 的 logical block 0 可以映射到不同物理 block；prefix caching 时也可能共享同一个物理 block。
 
-## 6. 本节小结
+Block table 还需要记录有效 length。最后一个 block 往往只有部分 slot 有效，Attention 不能读取未写入位置。
 
-理解 paged KV 时，先把基本分配和 slot mapping 想清楚，再理解 prefix cache 的复用与引用计数。
+## 五、BlockManager 的职责
 
-paged KV 最容易错的是逻辑位置和物理位置混淆。逻辑 token position 是 sequence 里的第几个 token；物理位置是某个 block 的某个 offset。attention kernel 读取 K/V 时必须用 block table 完成这次映射。
+BlockManager 管理的是“谁拥有哪些物理块”，不负责模型算 K/V。
 
-另一个容易错的地方是释放。请求结束后可以释放它独占的 block，但共享 prefix block 只有引用计数归零时才能释放。学完本节后，应能解释 logical token position、logical block、physical block、offset、slot mapping 和 prefix cache 的关系。
+核心状态：
+
+```text
+free_block_ids
+sequence_id -> block_table
+block ref_count
+可选 token hash / prefix metadata
+```
+
+核心操作：
+
+```text
+allocate(sequence, required_tokens)
+ensure_capacity(sequence, new_length)
+slot_mapping(sequence, positions)
+release(sequence)
+usage_stats()
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free
+    Free --> Owned: allocate
+    Owned --> Shared: prefix reuse / ref++
+    Shared --> Owned: one owner release / ref--
+    Owned --> Free: final release
+    Shared --> Free: ref_count becomes 0
+```
+
+## 六、Prefill 怎样分配 Block
+
+Prompt 长度 L，需要：
+
+```text
+required_blocks = ceil(L / block_size)
+```
+
+例如 `L=9, block_size=4`：
+
+```text
+required_blocks = 3
+logical block 0: tokens 0..3
+logical block 1: tokens 4..7
+logical block 2: token 8，有 3 个空 slot
+```
+
+Manager 从 free list 取 3 个 physical blocks，建立 table，再返回 prompt positions 的 slot mapping。Model backend 把每层 prompt K/V scatter 到这些 slots。
+
+## 七、Decode 怎样增长
+
+假设当前 length=8、block_size=4，已有两个满 block。Append position 8 时：
+
+```text
+logical block = 2
+```
+
+Block table 尚无第 3 项，因此先分配新 physical block，再写 offset 0。
+
+如果当前 length=7，append position 7 仍位于已有 logical block 1 的 offset 3，无需新 block。
+
+因此 decode 并不是每步都分配 block，而是在跨越 block 边界时分配。
+
+## 八、内部碎片怎样计算
+
+每条 sequence 已分配 slots：
+
+```text
+allocated_slots = num_blocks * block_size
+wasted_slots = allocated_slots - current_length
+```
+
+例：length=17。
+
+| block size | blocks | allocated slots | wasted |
+| ---: | ---: | ---: | ---: |
+| 16 | 2 | 32 | 15 |
+| 8 | 3 | 24 | 7 |
+| 4 | 5 | 20 | 3 |
+
+内部碎片率可定义：
+
+```text
+wasted_slots / allocated_slots
+```
+
+报告必须写清口径：是按某请求、所有活跃请求，还是整个物理 pool 统计。
+
+## 九、Block Size 为什么不是越小越好
+
+小 block：
+
+- 最后 block 浪费少；
+- 分配粒度细；
+- block table 更长；
+- metadata/hash/refcount 更多；
+- kernel 间接寻址更频繁。
+
+大 block：
+
+- table 短；
+- 连续访问范围更大；
+- 最后 block 内部碎片更严重；
+- 一个短请求也至少占一个大 block。
+
+最佳值依赖长度分布、cache layout、kernel 和管理开销，不能只在单个 17-token 例子上决定。
+
+## 十、外部碎片与内部碎片
+
+### 外部碎片
+
+连续分配中，总空闲空间足够，却散成多个小洞，无法提供所需连续大块。
+
+### 内部碎片
+
+固定 block 已分配给请求，但最后一块部分 slot 未使用。
+
+Paged KV 用固定 block 大幅减轻连续大块的外部碎片，却仍有最后 block 的内部碎片。它不是“完全没有碎片”。
+
+## 十一、Attention 怎样读取 Paged KV
+
+对每条 sequence、每个历史 position：
+
+```text
+position -> block/offset -> physical slot -> K/V
+```
+
+Reference 可以先构造 slot list，再 `index_select` 出 dense K/V；生产 kernel 通常在 Attention 内直接按 block table 读取，避免 gather 中间 tensor。
+
+额外间接寻址是代价。PagedAttention 的价值来自整体内存管理与并发容量，而不是每次 load 比连续地址更便宜。
+
+## 十二、Prefix Cache 的基本条件
+
+多个请求可能共享相同 system prompt：
+
+```text
+A tokens: [1,2,3,4,5,6,...]
+B tokens: [1,2,3,4,9,...]
+```
+
+若 block_size=4，第一个完整 block `[1,2,3,4]` 完全相同，其 K/V 可复用。
+
+为什么通常只复用完整 block？
+
+- hash 和 ownership 边界清楚；
+- 后续不同 token 可以从新 block 分叉；
+- 不需要管理同一物理 block 中部分共享、部分私有的复杂写时复制。
+
+## 十三、Token Hash 不是普通字符串 Hash
+
+Prefix cache key 至少要反映 token 序列。生产环境还可能纳入：
+
+```text
+model / adapter identity
+cache dtype/layout
+position / rope configuration
+多模态输入或其他影响 K/V 的信息
+```
+
+只用原始文本 hash 不可靠，因为 chat template/tokenizer 配置可能让相同文本产生不同 tokens；不同模型的相同 tokens 也不能共享 K/V。
+
+## 十四、引用计数与释放
+
+若 A/B 共享 physical block 7：
+
+```text
+ref_count[7] = 2
+```
+
+A 结束：
+
+```text
+ref_count[7] -> 1
+```
+
+不能归还 free list，因为 B 仍使用。只有归零才释放。
+
+同一 sequence 的独占尾部 block 则可直接释放。Release 应遍历 owned/shared metadata，不能把 block table 中所有 ID 无条件放回 free list。
+
+## 十五、Eviction 与 Prefix Cache 的边界
+
+如果 cache pool 满了，未被活跃请求引用的 cached blocks 可能需要淘汰。策略可考虑：
+
+```text
+LRU / recency
+prefix length
+recompute cost
+tenant isolation
+```
+
+课程实现只做教学近似，不宣称具备生产级 eviction、一致性或跨租户安全。报告应明确此边界。
+
+## 十六、分配失败与 Preemption
+
+当 free blocks 不足，Manager 应明确返回容量不足，Scheduler 再决定：
+
+- 等待已有请求结束；
+- 抢占/换出某些请求；
+- 释放可淘汰 prefix blocks；
+- 拒绝新请求。
+
+BlockManager 不应偷偷覆盖仍被引用的 block。内存管理提供事实，调度策略做取舍。
+
+## 十七、正确性测试
+
+### 地址映射
+
+使用非顺序 physical block table，例如 `[7,2,9]`，验证跨 block positions。
+
+### 边界
+
+长度：
+
+```text
+0, 1, block_size-1, block_size, block_size+1
+```
+
+### 写读一致
+
+给每个 position 写可识别 K/V，再按逻辑顺序读取。
+
+### Release
+
+释放后 free count 恢复；重复释放有明确语义。
+
+### Prefix Sharing
+
+共享 block refcount 正确；一方 release 不破坏另一方；尾部不同 block 不误共享。
+
+### OOM
+
+请求需要超过 free blocks 时不部分污染状态；失败后 free list/table 保持一致。
+
+## 十八、本周实验
+
+### 实验 1：手算 Block Table
+
+对给定 table 和 positions 手算 slots，并与程序输出对齐。
+
+### 实验 2：Block Size 与碎片
+
+对同一长度分布比较 block_size=4/8/16，统计 table 长度、wasted slots 和 ratio。
+
+### 实验 3：Paged K/V 写读
+
+写入跨 block prompt 和多个 decode token，再 gather 为 dense 与 reference 对齐。
+
+### 实验 4：Prefix Reuse
+
+构造两个共享完整前缀 block 的请求，比较物理 block 数与引用计数。
+
+### 实验 5：释放顺序
+
+先释放 A 再 B、先 B 再 A，最终 free pool 应一致。
+
+### 实验 6：Attention 对齐
+
+Paged decode 与同一逻辑 K/V 的 dense reference 对齐。
+
+## 十九、常见误区
+
+### Logical block ID 就是 physical block ID
+
+不一定，block table 正是负责二者映射。
+
+### Paged KV 消除了所有碎片
+
+它减少外部碎片，但最后 block 仍有内部碎片。
+
+### Block 越小容量利用率越高，所以越好
+
+还要付出 table、metadata、hash 和 kernel 寻址成本。
+
+### 相同文本一定能复用 Prefix KV
+
+必须比较实际 tokens，并考虑模型和 cache 配置。
+
+### Sequence 结束后可释放 table 中所有 block
+
+共享 prefix block 需要 refcount 归零。
+
+### PagedAttention 改变了 Attention 结果
+
+正确实现只改变地址布局，逻辑 K/V 顺序与数学结果不变。
+
+## 二十、学完本周，应能回答
+
+1. 逻辑 position 如何映射到 physical slot？
+2. Block table 为何属于 sequence？
+3. Prefill 和 decode 分别何时分配新 block？
+4. 内部与外部碎片有何区别？
+5. Block size 的主要权衡是什么？
+6. Prefix cache 为什么优先复用完整 block？
+7. Hash key 还需包含哪些上下文？
+8. 引用计数如何避免错误释放？
+9. 分配失败时 BlockManager 与 Scheduler 各负责什么？
+
+## 参考与素材说明
+
+- 猛猿：[PagedAttention 原理](https://zhuanlan.zhihu.com/p/691038809)
+- 猛猿：[BlockManager](https://zhuanlan.zhihu.com/p/700780161)
+- 猛猿：[Prefix Caching](https://zhuanlan.zhihu.com/p/707228704)
+- 猛猿：[vLLM V1：KVCacheManager 与 PrefixCaching](https://zhuanlan.zhihu.com/p/1916181593229334390)
+- 课程工程：BlockManager、PagedKVCache 与 Week 10 grader
+
+正文、地址算例、状态图和实验均为课程原创组织。课程 prefix cache 是教学近似，生产能力和安全边界不应从示例中外推。
