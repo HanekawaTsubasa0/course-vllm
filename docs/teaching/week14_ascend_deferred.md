@@ -1,18 +1,20 @@
-# Week 14: AscendC
+# Week 14: AscendC 概念导读（实验暂缓）
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
-本节学习 AscendC：
+本节只做 AscendC 的概念导读。当前课程没有统一的 Ascend 硬件和 CANN 环境，因此不安排必做算子实验，也不把 AscendC kernel 计入本轮工程验收。
+
+本节希望建立以下认识：
 
 - 了解华为 Ascend 的基本架构。
 - 了解 AscendC 的编程方式。
 - 对照 CUDA 理解两类加速卡编程模型的相似点和差异。
-- 运行官方 Add 样例，理解 AscendC 算子开发的基本链路。
-- 对照一个简单算子，比较 AscendC 版本与 CUDA 版本的差异。
+- 通过官方 Add 样例的结构，理解 AscendC 算子开发的基本链路。
+- 以简单算子为例，从概念上比较 AscendC 与 CUDA 的差异。
 
 这一节的重点是建立“同一个算子在不同 AI 加速器上如何表达”的对比视角。
 
-## 1. 为什么要了解 AscendC
+## 2. 背景知识：为什么要了解 AscendC
 
 前面几周主要使用 CUDA。CUDA 是 NVIDIA GPU 的主流编程体系，很多 LLM serving 系统、kernel 库和 profiling 工具都围绕 CUDA 生态展开。但智能计算系统不只有 NVIDIA GPU，华为 Ascend NPU 也是常见 AI 加速器之一。
 
@@ -27,7 +29,7 @@
 
 这对理解“算子优化不是只写公式”很重要。一个算子的数学形式可能很简单，但高性能实现取决于硬件结构、存储层次、编程模型和工具链。
 
-## 2. Ascend、CANN 与 AscendC 的基本概念
+## 3. 背景知识：Ascend、CANN 与 AscendC 的基本概念
 
 Ascend 是华为的 AI 处理器/加速卡体系。和 CUDA 对应 NVIDIA GPU 生态类似，Ascend 也有自己的软件栈和算子开发方式。
 
@@ -49,7 +51,7 @@ CANN 算子库    -> Ascend 生态中的算子和运行支持
 
 这个类比只是帮助入门，不能认为二者 API 或执行模型一一对应。
 
-## 3. 和 CUDA 对照看编程模型
+## 4. 原理详解：和 CUDA 对照看编程模型
 
 CUDA 中，一个最小 kernel 通常包含：
 
@@ -77,7 +79,7 @@ AscendC 也需要区分主机侧调度和设备侧计算，但术语、编译工
 
 这和前面 CUDA 周次是同一类问题，只是硬件和 API 不同。
 
-## 4. Add 样例
+## 5. 原理详解：为什么 Add 是新后端第一课
 
 Add 也就是向量加法：
 
@@ -95,9 +97,9 @@ device 侧是否能并行读写
 结果是否能和 reference 对齐
 ```
 
-这和 Week03 的 CUDA vector add 是同一个教学目的。区别在于 Week03 用 CUDA 和 PyTorch extension，Week14 如果有 Ascend 环境，则用 AscendC 官方样例和 Ascend 工具链。
+这和 Week03 的 CUDA vector add 是同一个教学目的。区别在于 Week03 使用现有 CUDA 环境完成实现，Week14 当前只阅读 AscendC 官方样例，理解算子如何通过 Ascend 工具链完成编译、部署和调用。
 
-## 5. 如果比较 CUDA 与 AscendC，应该比较什么
+## 6. 原理详解：如果比较 CUDA 与 AscendC，应该比较什么
 
 如果有环境完成一个 AscendC 小算子，不应该只比较“代码长得像不像”。更有意义的是比较这些维度：
 
@@ -112,7 +114,7 @@ device 侧是否能并行读写
 
 这样比较才贴近“智能计算系统编程与优化”的目标。
 
-## 6. 如何学习 AscendC
+## 7. 原理详解：如何学习 AscendC
 
 学习 AscendC 时，可以沿着和 CUDA 入门相同的问题走：
 
@@ -123,8 +125,8 @@ device 侧是否能并行读写
 - 结果如何和同一个 reference 对齐？
 - profiling 工具如何判断时间花在哪里？
 
-如果有 Ascend 硬件和 CANN 工具链，可以运行官方 Add 样例，观察编译、运行和结果校验流程。没有 Ascend 环境时，也应完成 CUDA 与 AscendC 编程模型的对照理解：host/device 分工、并行粒度、内存层次、数据搬运和 profiling 工具分别如何变化。
+当前只要求完成 CUDA 与 AscendC 编程模型的对照理解：host/device 分工、并行粒度、内存层次、数据搬运和 profiling 工具分别如何变化。后续具备统一的 Ascend 硬件、CANN 版本和验收环境后，再恢复官方 Add 样例及对照算子实验。
 
-## 7. 本节应该形成的对比视角
+## 8. 本节小结
 
-重点是理解：如果同样的 vector add 或 RMSNorm 放到 AscendC 上，数学公式不变，但编译工具链、设备侧并行方式、内存层次和 profiling 工具都会变化。
+重点是理解：如果同样的 vector add 或 RMSNorm 放到 AscendC 上，数学公式不变，但编译工具链、设备侧并行方式、内存层次和 profiling 工具都会变化。本周不要求提交 AscendC 代码。

@@ -1,12 +1,12 @@
 # Week 02: Profiling 与性能分析
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 Week02 不继续展开 LLM serving 的完整流程，而是专门讲“如何判断系统慢在哪里”。学习重点是从第一周的功能性视角切换到性能分析视角：同样是一次生成请求，它可能慢在 CPU、GPU、内存拷贝、kernel 本身、队列等待、batching 策略、同步点或 HTTP 客户端。没有 profiling，就只能凭感觉猜。
 
 本周的核心能力是：看到一个性能指标变化后，能提出合理假设，并知道用哪种工具验证。
 
-## 1. 性能分析为什么不能只看总耗时
+## 2. 背景知识：性能分析为什么不能只看总耗时
 
 LLM serving 的一次请求跨越很多层：
 
@@ -53,7 +53,7 @@ kernel 层 profiler 回答“单个 CUDA kernel 为什么没有跑满”：
 
 这三层不能互相替代。服务层指标能说明用户体验，但不能解释 kernel 为什么慢；kernel profiler 能解释一个 kernel，但不能说明队列和 batching 是否合理。
 
-## 2. Roofline 思维
+## 3. 原理详解：Roofline 思维
 
 Roofline model 是一种性能上界分析方法。它把程序性能限制粗略分成两类：compute-bound 和 memory-bound。
 
@@ -73,7 +73,7 @@ arithmetic intensity = FLOPs / bytes moved
 - 如果一个算子计算密集，优化方向是提高并行度、使用更合适的数据类型、调用高效 GEMM。
 - 如果 GPU timeline 上有大量空洞，瓶颈可能不是 kernel 本身，而是调度、同步或 CPU 侧。
 
-## 3. LLM serving 里的典型瓶颈
+## 4. 原理详解：LLM serving 里的典型瓶颈
 
 prefill 阶段通常有较大的矩阵乘和长序列 attention。它的 GPU 利用率可能比较高，但 prompt 很长时 TTFT 会变大。prefill 的优化方向包括 batch prefill、chunked prefill、attention kernel 优化和减少不必要的数据搬移。
 
@@ -85,7 +85,7 @@ sampling 通常不是最大开销，但在 vocab 很大、batch 较大、top-k/t
 
 服务端队列会影响 TTFT 和 tail latency。吞吐优化通常会让请求等待合批窗口，这可能提升 tokens/s，但增加部分请求延迟。
 
-## 4. 常用工具应该怎么看
+## 5. 原理详解：常用工具应该怎么看
 
 PyTorch profiler 适合回答：
 
@@ -117,7 +117,7 @@ Nsight Compute 适合回答：
 - latency 分位数如何变化。
 - tail latency 是否恶化。
 
-## 5. 如何形成一个性能结论
+## 6. 原理详解：如何形成一个性能结论
 
 性能分析不能只写“运行变慢了”或“GPU 利用率不高”。一个合格的性能结论至少包含四步。
 
@@ -137,6 +137,6 @@ Nsight Compute 适合回答：
 - 使用了哪个工具验证。
 - 还有哪些证据不足。
 
-## 6. 实验中的少量对照
+## 7. 本节小结
 
-实验中会运行服务压测、PyTorch profiler、Nsight Systems 和 Nsight Compute。使用这些工具时，重点不是记命令，而是把输出归类：端到端指标、框架 op 热点、系统时间线、单 kernel 细节分别回答哪类问题。
+性能分析不是“看到慢就猜原因”，而是建立证据链。端到端指标回答用户体验，系统时间线回答 CPU/GPU/拷贝/同步如何排列，kernel 分析回答单个 GPU kernel 内部为什么慢。学习本节后，应能把一个性能问题拆成观测、假设、验证和结论四步。

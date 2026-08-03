@@ -1,10 +1,17 @@
 # Week 12: 系统优化与 Admission Control
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
-Week12 聚焦模型以外的系统优化：CPU 到 GPU 的数据传输、pinned memory、CUDA stream、transfer stream、admission control。它不再讲新的 transformer 算子，而是讲 serving 系统如何保护自身和减少非模型开销。
+前面几周主要学习模型计算、KV cache 和调度。本周换一个角度：即使模型算子本身已经正确，在线服务仍然可能慢，甚至可能被过多请求拖垮。原因是请求进入 GPU 之前还有 CPU 侧准备、数据传输、同步等待、队列堆积和容量保护。
 
-## 1. Host-to-device copy
+本周要回答四个问题：
+
+- CPU 到 GPU 的数据传输为什么会影响 serving 延迟？
+- pinned memory 和 CUDA stream 为什么能帮助 copy 与 compute 重叠？
+- 为什么“写了异步 copy”不等于真的异步？
+- admission control 为什么是服务系统必须具备的保护机制？
+
+## 2. 背景知识：Host-to-device copy
 
 模型权重通常已经在 GPU 上，但请求 token、attention mask、position ids 等输入数据可能从 CPU 构造后拷到 GPU。这个过程叫 host-to-device copy, H2D copy。
 
@@ -14,7 +21,33 @@ Week12 聚焦模型以外的系统优化：CPU 到 GPU 的数据传输、pinned 
 
 学习时要注意：系统优化不是“所有开关都打开就一定更快”。它依赖 workload。长 prompt、大 batch 时，模型计算可能淹没 copy 成本；短请求、高并发时，copy、调度和同步可能显得更重要。
 
-## 2. Pinned memory
+H2D copy 的完整路径可以粗略理解为：
+
+```text
+CPU 构造输入
+-> 输入 tensor 位于 host memory
+-> 通过 PCIe / NVLink 等通道传到 GPU memory
+-> GPU kernel 读取 device tensor 开始计算
+```
+
+如果 copy 和 compute 串行，时间线像这样：
+
+```text
+copy batch 1 -> compute batch 1 -> copy batch 2 -> compute batch 2
+```
+
+理想的重叠是：
+
+```text
+compute batch 1
+    overlaps with copy batch 2
+compute batch 2
+    overlaps with copy batch 3
+```
+
+重叠不是改变数学结果，而是减少硬件等待。CPU、copy engine 和 GPU compute unit 如果能同时忙起来，总耗时就可能下降。
+
+## 3. 原理详解：Pinned memory
 
 普通 CPU 内存可能被操作系统分页移动。GPU DMA 更喜欢页锁定内存，也就是 pinned memory。pinned memory 不能被操作系统随意换出，因此可以支持更高效的异步传输。
 
@@ -29,7 +62,23 @@ gpu_tensor = cpu_tensor.to(device="cuda", non_blocking=True)
 
 但 `non_blocking=True` 不等于一定异步。它需要 pinned memory、合适的 stream、没有立即消费导致的同步等条件共同成立。否则代码看起来是异步，timeline 上仍然可能串行。
 
-## 3. CUDA stream 和 transfer stream
+为什么普通内存不够理想？因为操作系统管理普通 pageable memory 时，可能把页面换出、移动或延迟映射。GPU copy engine 要做 DMA 传输时，需要稳定的物理内存页。如果源内存不是 pinned memory，运行时可能先把数据拷到临时 pinned buffer，再从 pinned buffer 传给 GPU。这样多了一步，且更难异步。
+
+pinned memory 的优点：
+
+- 更适合 DMA。
+- 更容易支持真正的 non-blocking H2D copy。
+- 对频繁小批量输入传输有帮助。
+
+pinned memory 的代价：
+
+- 占用不能随便换出的物理内存。
+- 分配和释放本身可能更贵。
+- 使用过多会影响整机内存管理。
+
+因此 pinned memory 适合复用，而不是每个请求临时大量分配。系统里常见做法是维护缓冲区或让数据加载管线复用 pinned buffer。
+
+## 4. 原理详解：CUDA stream 和 transfer stream
 
 CUDA stream 是 GPU 操作的有序队列。同一个 stream 内操作按顺序执行，不同 stream 之间可能并发或重叠。
 
@@ -49,7 +98,44 @@ compute batch N
 
 如果 copy 和 compute 在时间线上仍然前后串行，就说明依赖、同步点或内存条件没有满足。
 
-## 4. Admission control
+理解 stream 时，先记住两个原则。
+
+第一，同一个 stream 内的操作按提交顺序执行：
+
+```text
+stream 0: copy A -> compute A -> copy B -> compute B
+```
+
+这里天然串行。即使 copy 本身支持异步，只要后面的 compute 必须等待它，stream 内也不会乱序。
+
+第二，不同 stream 之间可以并发，但必须显式处理依赖：
+
+```text
+transfer stream: copy batch N+1
+compute stream:  compute batch N
+```
+
+如果 compute batch N+1 要读取 copy batch N+1 的结果，就必须等待对应 copy 完成。常见做法是用 event 表达依赖：
+
+```text
+transfer stream copy 完成
+-> record event
+compute stream wait event
+-> compute 使用这份输入
+```
+
+初学者常见误区是把 stream 当成“自动并行开关”。实际上 stream 只是给运行时提供并发执行的可能性，真正能不能重叠还取决于：
+
+- 硬件是否有独立 copy engine。
+- copy 和 compute 是否使用不同资源。
+- 源内存是否 pinned。
+- 后续操作是否立刻同步等待。
+- 是否调用了会强制同步的 API。
+- tensor 生命周期是否安全。
+
+所以系统优化必须看 timeline，而不是只看代码表面。
+
+## 5. 原理详解：Admission control
 
 admission control 是请求进入系统前的保护机制。LLM 服务里常见限制包括：
 
@@ -73,7 +159,29 @@ admission control 的本质是把系统容量边界显式化。在线服务不�
 
 入门实现通常会先做 prompt 长度和队列深度限制。生产系统会进一步用 tokenizer 后的 token 数、预计输出长度和当前 KV cache 剩余容量做判断。
 
-## 5. 投机解码与量化的方向性理解
+admission control 不是“服务偷懒拒绝用户”，而是避免系统进入不可恢复的坏状态。没有 admission control 时，常见后果包括：
+
+- 队列无限增长，所有请求 TTFT 都变差。
+- 大量超长 prompt 占满 KV cache，新请求无法进入。
+- GPU OOM 导致正在服务的请求一起失败。
+- 请求已经排队很久，最后仍然超时，浪费用户等待时间。
+
+一个简单的接收判断可以这样理解：
+
+```text
+如果 prompt_tokens > max_prompt_tokens:
+    拒绝，因为单个请求太长
+
+如果 waiting_queue_size >= max_queue_size:
+    拒绝，因为排队已经过长
+
+如果 estimated_kv_tokens > remaining_kv_capacity:
+    拒绝或等待，因为显存容量不足
+```
+
+更高级的策略会加入优先级、公平性、租户隔离、SLA、请求超时和取消机制。无论策略多复杂，本质都是一个问题：系统当前容量是否足够接纳这个请求，并在合理时间内完成它？
+
+## 6. 背景知识：投机解码与量化的方向性理解
 
 投机解码 speculative decoding 是一种降低 decode 成本的思路。它通常使用一个较小、较快的 draft model 先提出若干候选 token，再由目标大模型一次性验证这些 token。若候选被接受，就能减少大模型逐 token 调用的次数；若候选被拒绝，则需要回退到大模型结果。
 
@@ -83,9 +191,9 @@ admission control 的本质是把系统容量边界显式化。在线服务不�
 
 这一节把投机解码和量化作为方向性知识理解。它们和 pinned memory、stream、admission control 一样，都是从系统层面降低成本或保护服务的手段。
 
-## 6. 做性能对比时要注意什么
+## 7. 本节小结
 
-系统优化必须用对照实验判断收益。只打开 pinned memory 或 transfer stream，并不自动说明性能变好。要比较优化前后：
+系统优化必须用对照测量判断收益。只打开 pinned memory 或 transfer stream，并不自动说明性能变好。要比较优化前后：
 
 - TTFT 是否降低。
 - TPOT 是否降低。
@@ -96,8 +204,4 @@ admission control 的本质是把系统容量边界显式化。在线服务不�
 
 还要注意 workload。长 prompt、大 batch 时，模型计算可能是主导；短请求、高并发时，CPU 调度、H2D copy 和同步开销更容易显现。
 
-系统优化的正确姿势是一次只改变一个主要因素。否则看到性能变化时，很难判断是 pinned memory、生效的 stream、batch size 变化，还是请求分布变化导致的。
-
-## 7. 实验中的少量对照
-
-实验会把 pinned memory、transfer stream、队列上限和 prompt 长度限制作为可观察开关。阅读代码时重点看这些开关如何影响数据传输、请求接收和健康状态统计。
+系统优化的正确姿势是一次只改变一个主要因素。否则看到性能变化时，很难判断是 pinned memory、生效的 stream、batch size 变化，还是请求分布变化导致的。学完本节后，应能解释为什么异步拷贝不一定真的异步，为什么 admission control 是保护系统而不是“故意拒绝用户”。

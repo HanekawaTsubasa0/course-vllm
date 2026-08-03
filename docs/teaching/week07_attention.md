@@ -1,12 +1,12 @@
 # Week 07: Attention
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 Week07 聚焦 attention 计算本身：Q/K/V 从哪里来，attention score 怎么算，为什么要做 causal mask，prefill attention 和 decode attention 为什么不是同一种工程形态，以及 FlashAttention 的基本思想是什么。
 
 KV cache 的生命周期会在 Week08 讲，paged KV 的 block 管理会在 Week10 讲。本周只把它们当作 attention 读取历史 K/V 的背景，不提前展开分页管理。
 
-## 1. Self-attention 基本公式
+## 2. 背景知识：Self-attention 基本公式
 
 Transformer attention 从 hidden states 计算 Q、K、V：
 
@@ -26,7 +26,7 @@ Attention(Q, K, V) = softmax(Q K^T / sqrt(d)) V
 
 多头 attention 把 hidden dimension 分成多个 head，每个 head 独立做 attention，最后拼接。
 
-## 2. Causal mask
+## 3. 背景知识：Causal mask
 
 自回归语言模型不能看未来 token。prefill 时，prompt 中所有 token 一次输入模型，但第 i 个 token 只能看第 1 到 i 个 token，不能看后面的 token。
 
@@ -38,7 +38,7 @@ score[i, j] = -inf if j > i
 
 decode 时每步只有一个新 token，它天然只看历史和自己，因此不需要构造完整的上三角 mask，但仍然要保证只能读合法历史长度。
 
-## 3. Prefill attention 和 decode attention 的差异
+## 4. 原理详解：Prefill attention 和 decode attention 的差异
 
 prefill attention 输入通常是：
 
@@ -59,7 +59,7 @@ K/V cache: 历史所有 token
 
 这导致两类 kernel 的形态不同。prefill 更像大矩阵/块状 attention，decode 更像按请求读取变长 KV cache。
 
-## 4. GQA
+## 5. 背景知识：GQA
 
 Grouped-query attention, GQA, 指 Q heads 数量大于 KV heads 数量。多个 Q heads 共享同一个 KV head。这样可以减少 KV cache 大小和带宽需求。
 
@@ -72,7 +72,7 @@ num_kv_heads = 8
 
 那么每 2 个 query heads 共享 1 个 KV head。实现 paged attention 时必须正确把 query head 映射到 KV head。
 
-## 5. FlashAttention 的基本思想
+## 6. 原理详解：FlashAttention 的基本思想
 
 普通 attention 的直接实现会显式构造 `Q K^T` 矩阵。对于长度为 `seq_len` 的序列，每个 head 的 score 矩阵大小是：
 
@@ -92,7 +92,7 @@ num_kv_heads = 8
 
 FlashAttention 没有改变 attention 的数学定义，改变的是计算顺序和内存访问方式。学习顺序上，先把 dense prefill attention 和 decode attention 写正确，再理解 FlashAttention 为什么能减少显存读写。
 
-## 6. Decode attention 与历史 K/V
+## 7. 原理详解：Decode attention 与历史 K/V
 
 decode 阶段每次只有一个新 query，但它要看完整历史 K/V。历史 K/V 可以来自连续 KV cache，也可以来自后续 Week10 的 paged KV cache。
 
@@ -106,9 +106,9 @@ out = prob v
 
 区别在于 kernel 如何找到第 `t` 个历史 token 的 K/V 地址。本节先理解 decode attention 要按有效历史长度读取 K/V；分页寻址的细节留到 Week10。
 
-## 7. 实现时最容易错的地方
+## 8. 本节小结
 
-需要保证 dense attention 对齐 PyTorch reference，paged decode attention 对齐把 K/V 读成 dense 后的 reference。
+复习 attention 时，要先确认 dense attention 的数学结果，再理解 decode attention 为什么要读取历史 K/V。Paged decode attention 只是改变 K/V 的存储和寻址方式，不改变 attention 公式本身。
 
 attention 的错误通常来自四类地方：
 
@@ -117,6 +117,4 @@ attention 的错误通常来自四类地方：
 - scale 错误：score 没有除以 `sqrt(head_dim)`。
 - 长度错误：decode 时读取了超过有效历史长度的 K/V。
 
-## 8. 实验中的少量对照
-
-实验会分别对齐 dense prefill attention 和 decode attention。阅读代码时重点看 Q/K/V shape、causal mask、GQA head 映射、历史长度和 reference 对齐。
+学完本节后，应能不依赖代码解释 attention 的完整数据流：hidden states 变成 Q/K/V，Q 和 K 打分，softmax 得到权重，权重加权 V 得到输出；同时能解释 prefill 和 decode 为什么需要不同的执行形态。

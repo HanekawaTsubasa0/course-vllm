@@ -830,7 +830,7 @@ python -m course_vllm.benchmarks.grader week13
 
 - 把论文机制映射到工程模块。
 - 复现一个小型机制：cache-aware serving。
-- 理解 prefill/decode disaggregation、TokenDance-style scheduling 等方向如何落到系统。
+- 理解 prefill/decode disaggregation、remaining-work scheduling 等方向如何落到系统。
 
 说明：本周 cache-aware serving 是 teaching approximation，用 shared-prefix score 展示请求重排的潜在价值；它还不是完整在线 scheduler，不包含真实到达时间、SLO、KV block 生命周期、饥饿控制或多租户公平性。
 
@@ -850,7 +850,7 @@ python -m course_vllm.benchmarks.cache_aware_demo \
   --mechanism "prefill-decode disaggregation" \
   --requests "128:16|2048:8|256:64|1024:12"
 python -m course_vllm.benchmarks.cache_aware_demo \
-  --mechanism "tokendance-style scheduling" \
+  --mechanism "remaining-work scheduling" \
   --requests "128:32|2048:4|256:16"
 ```
 
@@ -859,7 +859,7 @@ python -m course_vllm.benchmarks.cache_aware_demo \
 - baseline shared-prefix score
 - cache-aware shared-prefix score
 - PD disaggregation estimated speedup
-- TokenDance-style completion cost
+- remaining-work completion cost
 - mapped modules: `engine/policies.py`, `engine/block_manager.py`, `engine/engine.py`
 
 ### 学生任务
@@ -940,7 +940,7 @@ python -m course_vllm.benchmarks.capacity_planner \
 ```bash
 python -m course_vllm.benchmarks.cache_aware_demo --mechanism "cache-aware serving"
 python -m course_vllm.benchmarks.cache_aware_demo --mechanism "prefill-decode disaggregation"
-python -m course_vllm.benchmarks.cache_aware_demo --mechanism "tokendance-style scheduling"
+python -m course_vllm.benchmarks.cache_aware_demo --mechanism "remaining-work scheduling"
 ```
 
 ### 最终交付物

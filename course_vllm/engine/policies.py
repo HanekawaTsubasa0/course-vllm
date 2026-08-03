@@ -58,7 +58,7 @@ def estimate_pd_disaggregation(
     }
 
 
-def tokendance_order(requests: list[dict[str, int]]) -> list[int]:
+def remaining_work_order(requests: list[dict[str, int]]) -> list[int]:
     """Prioritize short remaining decode work while keeping older requests stable."""
     return sorted(
         range(len(requests)),
@@ -95,8 +95,8 @@ def paper_to_system_map(mechanism: str) -> dict:
             "metrics": ["TTFT", "TPOT", "queue depth", "batch size"],
             "minimal_experiment": "toggle chunked prefill and compare latency distribution under mixed prompt lengths",
         },
-        "tokendance-style scheduling": {
-            "paper_idea": "adapt decode scheduling to token-level progress instead of static request order",
+        "remaining-work scheduling": {
+            "paper_idea": "prioritize estimated remaining decode work while using request age as a tie-breaker",
             "engine_modules": ["engine/scheduler.py", "engine/request.py"],
             "data_structures": ["per-sequence generated token count", "decode batch"],
             "metrics": ["tail latency", "fairness", "output_tokens/s"],

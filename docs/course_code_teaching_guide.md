@@ -696,7 +696,7 @@ python -m course_vllm.benchmarks.cache_aware_demo \
   --mechanism "prefill-decode disaggregation" \
   --requests "128:16|2048:8|256:64|1024:12"
 python -m course_vllm.benchmarks.cache_aware_demo \
-  --mechanism "tokendance-style scheduling" \
+  --mechanism "remaining-work scheduling" \
   --requests "128:16|2048:8|256:64|1024:12"
 python -m course_vllm.benchmarks.grader week15
 ```

@@ -1041,7 +1041,7 @@ Week15 前沿专题 demo。
 ```text
 cache-aware serving
 prefill-decode disaggregation
-tokendance-style scheduling
+remaining-work scheduling
 ```
 
 输出 paper-to-system 映射和最小定量指标。

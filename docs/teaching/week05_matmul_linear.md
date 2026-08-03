@@ -1,12 +1,12 @@
 # Week 05: Matmul 与 Linear
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 Week05 聚焦矩阵乘和线性层。前面 Week04 讲的是逐行归一化和位置旋转，这些算子很重要但不是 LLM 计算量的主体。真正占据 transformer 大量 FLOPs 的，是 attention projection、MLP projection 中的 linear，也就是矩阵乘。
 
 本周要讲清楚 GEMM、weight layout、naive matmul、tiled matmul 和 shared memory 的基本思想。
 
-## 1. Linear 为什么核心
+## 2. 背景知识：Linear 为什么核心
 
 Transformer 层里到处都是线性变换：
 
@@ -38,7 +38,7 @@ y = x @ weight.T
 
 LLM 中 hidden size 和 intermediate size 都很大，因此 GEMM 是主要计算来源之一。
 
-## 2. Naive matmul
+## 3. 原理详解：Naive matmul
 
 矩阵乘：
 
@@ -56,7 +56,7 @@ C[i, j] = sum_{k=0}^{K-1} A[i, k] * B[k, j]
 
 这种实现容易理解，但性能不高。原因是 A/B 元素会被反复从 global memory 读取。例如同一行 A 会被多个输出列使用，同一列 B 会被多个输出行使用。naive 实现没有利用这种数据复用。
 
-## 3. Tiled matmul 和 shared memory
+## 4. 原理详解：Tiled matmul 和 shared memory
 
 tiled matmul 的核心思想是把 A 和 B 分块。一个 thread block 负责 C 的一个 tile。它先把 A 的 tile 和 B 的 tile 从 global memory 读到 shared memory，然后 block 内线程重复使用 shared memory 中的数据。
 
@@ -76,9 +76,9 @@ shared memory 比 global memory 快，但容量小，只在一个 block 内共�
 
 这个机制是 CUDA 优化的经典例子：不是改变数学公式，而是改变数据搬运方式。
 
-## 4. 工程上还要注意什么
+## 5. 原理详解：矩阵乘还要注意什么
 
-第一，weight layout 容易弄错。PyTorch `nn.Linear` 的 weight 通常是 `[out_features, in_features]`，而矩阵乘需要 B 是 `[in_features, out_features]`。所以实现时经常要转置或按转置后的逻辑访问。
+第一，weight layout 容易弄错。PyTorch `nn.Linear` 的 weight 通常是 `[out_features, in_features]`，而矩阵乘需要 B 是 `[in_features, out_features]`。所以理解 Linear 时要特别注意：数学公式里的矩阵方向、张量实际存储方向、算子读取方向不一定写成同一个样子。
 
 第二，边界 tile 必须处理。M、N、K 不一定是 tile size 的整数倍。
 
@@ -86,7 +86,7 @@ shared memory 比 global memory 快，但容量小，只在一个 block 内共�
 
 第四，教学中的基础 matmul 不等于工业 GEMM。cuBLAS、CUTLASS 会使用更复杂的 tiling、tensor cores、warp-level MMA、pipeline 等技巧。学习时先掌握最基础的 shared memory tiling，再理解工业库为什么复杂。
 
-## 5. 实现时最容易错的地方
+## 6. 本节小结
 
 naive matmul 最容易错的是索引。给定：
 
@@ -102,8 +102,4 @@ C: [M, N]
 sum_k A[i, k] * B[k, j]
 ```
 
-tiled matmul 最容易错的是 tile 边界和同步。一个 tile 加载到 shared memory 后，block 内线程必须在计算前同步；计算完当前 tile 后，再进入下一个 tile。边界 tile 不满时，越界元素要当作 0 处理。
-
-## 6. 实验中的少量对照
-
-实验会先实现 naive matmul，再实现 shared-memory tiled matmul，并把它接到 linear 层。阅读代码时只需要确认三件事：shape 是否对齐、weight layout 是否正确、CUDA 输出是否和 PyTorch reference 接近。
+tiled matmul 最容易错的是 tile 边界和同步。一个 tile 加载到 shared memory 后，block 内线程必须在计算前同步；计算完当前 tile 后，再进入下一个 tile。边界 tile 不满时，越界元素要当作 0 处理。学完本节后，应能从访存复用角度解释为什么 tiled matmul 比 naive matmul 更接近高性能实现。

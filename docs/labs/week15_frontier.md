@@ -14,13 +14,13 @@
 
 - cache-aware serving
 - prefill-decode disaggregation
-- TokenDance-style scheduling
+- remaining-work scheduling
 
 ## 实验任务
 
 1. 选择一个机制，生成 paper-to-system 映射。
 2. 说明涉及的模块、数据结构、指标。
-3. 运行最小复现实验，例如 cache-aware order 的 shared-prefix score、PD disaggregation 的估算 speedup、TokenDance-style scheduling 的 completion cost。
+3. 运行最小复现实验，例如 cache-aware order 的 shared-prefix score、PD disaggregation 的估算 speedup、remaining-work scheduling 的 completion cost。
 4. 说明如何把机制从 demo 推进到完整服务主路径。
 
 ## TODO(lab15)
@@ -39,7 +39,7 @@ python -m course_vllm.benchmarks.cache_aware_demo \
   --mechanism "prefill-decode disaggregation" \
   --requests "128:16|2048:8|256:64|1024:12"
 python -m course_vllm.benchmarks.cache_aware_demo \
-  --mechanism "tokendance-style scheduling" \
+  --mechanism "remaining-work scheduling" \
   --requests "128:32|2048:4|256:16"
 python -m course_vllm.benchmarks.grader week15
 ```

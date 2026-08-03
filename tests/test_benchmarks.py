@@ -2,7 +2,7 @@ from course_vllm.benchmarks.bench_server import summarize
 from course_vllm.benchmarks.cache_aware_demo import (
     cache_aware_order,
     run_pd_disaggregation,
-    run_tokendance,
+    run_remaining_work,
     score_order,
 )
 from course_vllm.benchmarks.capacity_planner import estimate_capacity, render_capacity_report
@@ -112,8 +112,8 @@ def test_paper_to_system_map_lists_engine_modules():
 def test_frontier_demos_produce_comparable_metrics():
     pd = run_pd_disaggregation("128:16|2048:8|256:64")
     assert pd["estimated_speedup"] >= 1.0
-    tokendance = run_tokendance("128:32|2048:4|256:16")
-    assert tokendance["tokendance_completion_cost_tokens"] <= tokendance["baseline_completion_cost_tokens"]
+    remaining_work = run_remaining_work("128:32|2048:4|256:16")
+    assert remaining_work["remaining_work_completion_cost_tokens"] <= remaining_work["baseline_completion_cost_tokens"]
 
 
 def test_grader_has_stage_mappings_for_course_tail():

@@ -1,12 +1,12 @@
 # Week 04: RMSNorm 与 RoPE
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 Week04 讲两个 transformer 模型内部的基础算子：RMSNorm 和 RoPE。它们都出现在 Qwen3 的每层 forward 中，但作用不同：RMSNorm 控制 hidden states 的尺度，RoPE 给 attention 注入位置信息。
 
 本周不深入讲完整 attention，也不讲 matmul 优化。重点是把数学公式、tensor shape、CUDA dispatch 三件事讲清楚。
 
-## 1. RMSNorm 的背景
+## 2. 背景知识：RMSNorm 的背景
 
 Transformer 层之间不断做线性变换、attention、MLP 和残差连接。如果 hidden states 的尺度在层间不断漂移，模型计算会不稳定。归一化层的作用就是稳定激活尺度。
 
@@ -39,7 +39,7 @@ mean_square[row] = sum_j x[row, j]^2 / hidden
 
 再对该行每个 hidden 位置缩放。
 
-## 2. RMSNorm 的 CUDA 思路
+## 3. 原理详解：RMSNorm 的计算过程
 
 RMSNorm 是 row-wise reduction 加 elementwise scaling。它天然分两步：
 
@@ -50,7 +50,7 @@ RMSNorm 是 row-wise reduction 加 elementwise scaling。它天然分两步：
 
 数值上要注意：即使输入是 fp16/bfloat16，平方和通常用 float32 累加，避免误差过大。
 
-## 3. RoPE 的背景
+## 4. 背景知识：RoPE 的背景
 
 Attention 本身只看 token 内容，不天然知道位置。位置编码的作用是告诉模型 token 的顺序。
 
@@ -73,7 +73,7 @@ rope(x) = x * cos(pos) + rotate_half(x) * sin(pos)
 
 RoPE 只作用于 Q 和 K，不作用于 V。原因是 attention score 来自 Q 和 K 的相似度，位置信息应该影响“看哪里”，而 V 是被加权汇总的内容。
 
-## 4. RoPE 的 CUDA 思路
+## 5. 原理详解：RoPE 的计算过程
 
 RoPE 是 elementwise 变换。每个输出元素依赖：
 
@@ -92,7 +92,7 @@ rows x head_dim
 
 每个线程处理一个或多个元素。
 
-## 5. RMSNorm 和 RoPE 在推理中的位置
+## 6. 原理详解：RMSNorm 和 RoPE 在推理中的位置
 
 RMSNorm 通常出现在 transformer block 的 attention 前和 MLP 前，用来稳定 hidden states 的尺度。它不改变 token 数，也不改变 hidden dimension，只对每个 token 的 hidden 向量做归一化和缩放。
 
@@ -100,7 +100,7 @@ RoPE 出现在 attention 计算 Q/K 之后、打分之前。它把位置信息�
 
 从 shape 上看，这两个算子都比较适合按行并行：RMSNorm 的一行是一个 token 的 hidden 向量，RoPE 的一行可以看作某个 token、某个 head 的 head_dim 向量。
 
-## 6. 实现时最容易错的地方
+## 7. 本节小结
 
 RMSNorm 主要 shape：
 
@@ -110,8 +110,4 @@ weight: [hidden]
 out: [tokens, hidden]
 ```
 
-RoPE 输出 shape 和输入 Q/K 相同。需要保证 Q 和 K 都被同样的位置旋转。
-
-## 7. 实验中的少量对照
-
-实验会把 RMSNorm 和 RoPE 的 CUDA 实现与 PyTorch reference 对齐。阅读代码时重点关注输入输出 shape、每个线程负责的数据范围、累加精度和位置索引是否一致。
+RoPE 输出 shape 和输入 Q/K 相同。Q 和 K 必须使用一致的位置旋转，否则 attention score 中的位置信息就会错位。学完本节后，应能从公式解释 RMSNorm 为什么要先求平方均值再乘权重，也能解释 RoPE 为什么只旋转 Q/K 而不旋转 V。

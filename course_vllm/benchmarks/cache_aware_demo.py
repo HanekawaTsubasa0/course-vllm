@@ -9,7 +9,7 @@ from course_vllm.engine.policies import (
     paper_to_system_map,
     score_decode_completion_cost,
     score_order,
-    tokendance_order,
+    remaining_work_order,
 )
 
 
@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument(
         "--requests",
         default="128:16|2048:8|256:64|1024:12",
-        help="pipe-separated prompt_len:decode_len pairs for PD/TokenDance demos",
+        help="pipe-separated prompt_len:decode_len pairs for PD/remaining-work demos",
     )
     parser.add_argument("--mechanism", default="cache-aware serving")
     args = parser.parse_args()
@@ -32,8 +32,8 @@ def main() -> None:
         result = run_cache_aware(args.prompts)
     elif mapping["mechanism"] == "prefill-decode disaggregation":
         result = run_pd_disaggregation(args.requests)
-    elif mapping["mechanism"] == "tokendance-style scheduling":
-        result = run_tokendance(args.requests)
+    elif mapping["mechanism"] == "remaining-work scheduling":
+        result = run_remaining_work(args.requests)
     else:
         raise RuntimeError(f"unhandled mechanism: {mapping['mechanism']}")
     result["paper_to_system"] = mapping
@@ -57,15 +57,15 @@ def run_pd_disaggregation(raw_requests: str) -> dict:
     return estimate_pd_disaggregation(requests)
 
 
-def run_tokendance(raw_requests: str) -> dict:
+def run_remaining_work(raw_requests: str) -> dict:
     requests = parse_requests(raw_requests)
     baseline = list(range(len(requests)))
-    optimized = tokendance_order(requests)
+    optimized = remaining_work_order(requests)
     return {
         "baseline_order": baseline,
-        "tokendance_order": optimized,
+        "remaining_work_order": optimized,
         "baseline_completion_cost_tokens": score_decode_completion_cost(requests, baseline),
-        "tokendance_completion_cost_tokens": score_decode_completion_cost(requests, optimized),
+        "remaining_work_completion_cost_tokens": score_decode_completion_cost(requests, optimized),
     }
 
 

@@ -79,7 +79,7 @@
 
 ## 6. 前沿机制映射
 
-选择一个机制，例如 cache-aware serving、prefill/decode disaggregation 或 TokenDance-style scheduling。
+选择一个机制，例如 cache-aware serving、prefill/decode disaggregation 或 remaining-work scheduling。
 
 | 项目 | 填写 |
 | --- | --- |

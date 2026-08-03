@@ -1,12 +1,12 @@
 # Week 03: CUDA Extension 入门
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 Week03 只讲 CUDA 编程模型和 PyTorch CUDA extension 的最小闭环，不讲复杂模型算子。目标是从 Python 世界进入 GPU kernel 世界：知道一个 tensor 怎么穿过 Python wrapper、C++ binding、CUDA launcher，最后由成百上千个 GPU thread 并行处理。
 
 本周重点不是性能优化，而是正确理解 CUDA execution model。
 
-## 1. 为什么要写自定义 CUDA 算子
+## 2. 背景知识：为什么要写自定义 CUDA 算子
 
 PyTorch 已经提供了很多高性能算子，例如 matmul、softmax、layer norm。那为什么还要学习写 CUDA？
 
@@ -18,7 +18,7 @@ PyTorch 已经提供了很多高性能算子，例如 matmul、softmax、layer n
 
 第三，学习上需要把“模型公式”落到“硬件执行”。只有写过最小 kernel，才能理解后续 RMSNorm、softmax、matmul、attention 为什么要按 thread/block 组织。
 
-## 2. CUDA execution model
+## 3. 原理详解：CUDA execution model
 
 CUDA kernel 是运行在 GPU 上的函数。一次 kernel launch 会启动一个 grid。grid 由多个 block 组成，block 由多个 thread 组成。
 
@@ -46,7 +46,7 @@ if idx < n:
 
 这叫 boundary check。没有边界检查就可能写越界。
 
-## 3. CUDA 内存层次的第一印象
+## 4. 背景知识：CUDA 内存层次的第一印象
 
 刚开始写 CUDA 时，先认识这些内存层次：
 
@@ -57,11 +57,11 @@ if idx < n:
 
 vector add 只用 global memory。每个线程读 `a[idx]` 和 `b[idx]`，写 `out[idx]`。它几乎没有数据复用，因此主要是 memory bandwidth 练习。
 
-## 4. PyTorch CUDA extension 的调用链
+## 5. 原理详解：PyTorch CUDA extension 的执行链路
 
-课程实验使用 PyTorch extension，而不是单独写 `.cu` 程序。原因是后续模型代码都使用 PyTorch tensor。自定义 kernel 必须能接受 PyTorch tensor，返回 PyTorch tensor，并参与 Python 侧测试。
+实际深度学习框架中经常使用 PyTorch extension，而不是单独写 `.cu` 程序。原因是模型计算通常已经围绕 PyTorch tensor 组织。自定义 kernel 必须能接受 PyTorch tensor，返回 PyTorch tensor，并能被 Python 侧程序调用。
 
-典型调用链：
+典型执行链路：
 
 ```text
 Python test
@@ -75,7 +75,7 @@ Python test
 
 `pybind11` 的作用是把 C++ 函数暴露给 Python。PyTorch extension 还负责把 `torch.Tensor` 对象传进 C++，让 C++ 侧可以检查 device、dtype、shape，并拿到底层 data pointer。
 
-## 5. vector add 为什么适合做第一课
+## 6. 原理详解：vector add 为什么适合做第一课
 
 vector add 的数学非常简单：
 
@@ -94,7 +94,7 @@ out[i] = a[i] + b[i]
 
 这相当于后续所有 CUDA lab 的最小原型。
 
-## 6. 从 Python 调到 CUDA
+## 7. 原理详解：从 Python 调到 CUDA
 
 PyTorch CUDA extension 的核心价值是把 Python tensor 交给自定义 CUDA kernel。典型链路是：
 
@@ -118,9 +118,9 @@ out: [n]
 
 测试时通常用 PyTorch 的 `a + b` 作为 reference。自定义 CUDA 输出只要和 reference 在误差范围内一致，就说明最小闭环跑通了。
 
-## 7. 写完 vector add 后应该理解什么
+## 8. 本节小结
 
-需要实现：
+本节最核心的 CUDA 索引公式是：
 
 ```text
 idx = blockIdx.x * blockDim.x + threadIdx.x
@@ -128,8 +128,4 @@ if idx < n:
     out[idx] = a[idx] + b[idx]
 ```
 
-这一节先把注意力放在 kernel body：线程如何定位元素、如何做边界检查、如何写回输出。C++ binding 和 Python harness 先作为调用框架来理解。
-
-## 8. 实验中的少量对照
-
-实验会让一个 CUDA kernel 完成向量加法，并用 PyTorch reference 做正确性比较。这里的重点不是向量加法本身，而是建立后续所有自定义算子的基本开发流程：写 kernel、编译 extension、从 Python 调用、对齐 reference、测量耗时。
+这一节先把注意力放在 kernel body 的基本语义：线程如何定位元素、如何做边界检查、如何写回输出。学完后应能解释 CPU 为什么要 launch kernel，GPU 为什么能同时跑很多线程，`blockIdx.x * blockDim.x + threadIdx.x` 为什么能得到全局元素编号，以及为什么越界线程必须什么都不做。

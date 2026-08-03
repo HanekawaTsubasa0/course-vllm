@@ -492,11 +492,11 @@ python -m course_vllm.benchmarks.cache_aware_demo \
   --requests "128:16|2048:8|256:64|1024:12"
 ```
 
-TokenDance-style scheduling：
+Remaining-work scheduling：
 
 ```bash
 python -m course_vllm.benchmarks.cache_aware_demo \
-  --mechanism "tokendance-style scheduling" \
+  --mechanism "remaining-work scheduling" \
   --requests "128:32|2048:4|256:16"
 ```
 

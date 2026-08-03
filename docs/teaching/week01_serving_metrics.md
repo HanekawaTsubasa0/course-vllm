@@ -1,6 +1,6 @@
 # Week 01: LLM Serving 流程与指标
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
 学习 LLM serving 不能停留在“调用一个模型 API”。训练好的模型只是服务系统里的一个组件。真正的 LLM serving 系统还要处理请求协议、tokenizer、prefill、decode、KV cache、batching、sampling、streaming、队列、指标、显存管理和故障隔离。
 
@@ -14,9 +14,9 @@ LLM serving = 自回归生成算法 + 在线服务系统 + GPU 资源管理。
 
 如果只理解自回归生成，不理解 serving 指标，就无法解释为什么需要 batching、paged KV、admission control。如果只理解 HTTP 服务，不理解 prefill/decode，就无法解释为什么 LLM 的请求形态和普通 Web API 完全不同。
 
-## 1. 从语言模型到在线服务
+## 2. 背景知识：从语言模型到在线服务
 
-### 1.1 语言模型本身在做什么
+### 2.1 语言模型本身在做什么
 
 自回归语言模型的基本任务是根据已有 token 预测下一个 token。给定上下文：
 
@@ -52,7 +52,7 @@ encode prompt
 
 这就是它和普通分类模型、embedding 模型、图像分类服务的根本区别。
 
-### 1.2 在线服务比离线推理复杂在哪里
+### 2.2 在线服务比离线推理复杂在哪里
 
 离线推理只关心“给一个 prompt，最后生成什么”。在线 serving 还要关心：
 
@@ -69,9 +69,9 @@ encode prompt
 
 因此，学习 LLM serving 不能只从模型结构讲起，还必须从服务指标和请求生命周期讲起。
 
-## 2. Prompt、Token、Tokenizer
+## 3. 背景知识：Prompt、Token、Tokenizer
 
-### 2.1 为什么服务端首先要分词
+### 3.1 为什么服务端首先要分词
 
 用户发来的 prompt 是字符串，但 transformer 模型不直接处理字符串。模型处理的是 token id 序列。tokenizer 负责把文本切分成 token，并映射到整数 id。
 
@@ -93,7 +93,7 @@ Explain KV cache.
 
 这个过程对 serving 很重要，因为很多指标按 token 计算，而不是按字符计算。两个 prompt 字符数接近，token 数可能不同；不同语言、空格、标点、代码片段都会影响 token 数。
 
-### 2.2 Chat template
+### 3.2 Chat template
 
 chat 模型通常不是直接把用户消息拼进去，而是用 chat template 把多轮消息转换成模型训练时熟悉的格式。比如：
 
@@ -107,9 +107,9 @@ assistant: ...
 
 服务端通常会把 chat messages 先交给 chat template，得到普通 prompt，再进入普通生成路径。这个转换会影响 token 序列，因此也会影响模型输出。
 
-## 3. Prefill 和 Decode
+## 4. 原理详解：Prefill 和 Decode
 
-### 3.1 为什么要分成两个阶段
+### 4.1 为什么要分成两个阶段
 
 LLM serving 的核心概念是 prefill 和 decode。它们不是两个随便起的名字，而是由自回归 transformer 的计算形态决定的。
 
@@ -136,18 +136,18 @@ step 2: input y_2, use KV(prompt + y_1), output y_3
 ...
 ```
 
-### 3.2 Prefill 的计算特点
+### 4.2 Prefill 的计算特点
 
 prefill 的输入长度可能很长，计算形态接近一次普通 transformer forward。它的特点是：
 
 - prompt 内所有 token 可以并行计算。
 - 矩阵乘规模较大，GPU 利用率通常较高。
-- attention 需要处理 prompt 内 token 之间的 causal attention。
+- attention 要计算 prompt 内 token 之间的 causal attention。
 - prefill 直接影响 TTFT。
 
 prefill 越长，用户等待第一个 token 的时间通常越长。长 prompt 请求会显著拖慢 TTFT，也会占用更多 KV cache。
 
-### 3.3 Decode 的计算特点
+### 4.3 Decode 的计算特点
 
 decode 每一步只处理一个新 token，但需要读取完整历史 KV cache。它的特点是：
 
@@ -159,9 +159,9 @@ decode 每一步只处理一个新 token，但需要读取完整历史 KV cache�
 
 这也是为什么 LLM serving 系统强调 continuous batching。单个请求每次只 decode 一个 token，太小；多个请求合成一个 decode batch，GPU 才更容易被喂满。
 
-## 4. KV Cache 为什么是 serving 的核心
+## 5. 原理详解：KV Cache 为什么是 serving 的核心
 
-### 4.1 Attention 里的 K/V
+### 5.1 Attention 里的 K/V
 
 Transformer attention 中，每个 token 会产生 query、key、value：
 
@@ -179,7 +179,7 @@ Attention(Q, K, V) = softmax(Q K^T / sqrt(d)) V
 
 在自回归 decode 中，历史 token 不会变。历史 token 的 K/V 也不会变。因此，如果每一步都重新计算全部历史 K/V，就是浪费。
 
-### 4.2 KV cache 的作用
+### 5.2 KV cache 的作用
 
 KV cache 保存每一层历史 token 的 key/value。这样 decode 时只需要为新 token 计算新的 K/V，再把它 append 到 cache 里。
 
@@ -205,7 +205,7 @@ num_layers * 2 * num_kv_heads * head_dim * dtype_bytes
 
 其中 `2` 表示 K 和 V。上下文越长、并发越高，KV cache 越容易成为显存瓶颈。这就是后续 Week08、Week10 要讲连续 KV cache 和 paged KV cache 的原因。
 
-## 5. Streaming 为什么重要
+## 6. 原理详解：Streaming 为什么重要
 
 用户体验上，LLM 服务通常不等完整回答生成完才返回，而是边生成边返回 token。这叫 streaming。
 
@@ -223,7 +223,7 @@ num_layers * 2 * num_kv_heads * head_dim * dtype_bytes
 -> 后续 token 持续出现
 ```
 
-即使总生成时间一样，streaming 也会显著改善主观体验，因为 TTFT 更短。
+即使总生成时间一样，streaming 也会显著改善主观体验，因为客户端不必等完整回答生成完才看到内容。需要区分两件事：streaming 让第一个 token 能尽早送达和被观测，但它本身不会缩短模型完成排队、prefill 和第一次采样所需的计算时间。只有执行路径或调度发生变化时，TTFT 才会真正改变。
 
 HTTP 上常见实现是 Server-Sent Events, SSE。服务端不断写：
 
@@ -241,11 +241,11 @@ data: [DONE]
 
 需要注意：streaming 是“返回方式”，continuous batching 是“模型执行调度方式”。二者不是同一个概念。一个服务可以支持 streaming，但 streaming 请求内部仍然串行执行；也可以 non-streaming 请求合批执行。
 
-## 6. Sampling 为什么会导致同样输入输出不同
+## 7. 原理详解：Sampling 为什么会导致同样输入输出不同
 
 模型输出 logits 后，服务端要决定下一个 token。常见方式有：
 
-### 6.1 Greedy decoding
+### 7.1 Greedy decoding
 
 选择概率最大的 token：
 
@@ -255,7 +255,7 @@ next = argmax(logits)
 
 当 `temperature=0` 时，很多系统会走 greedy path。同样输入通常输出相同。
 
-### 6.2 Temperature sampling
+### 7.2 Temperature sampling
 
 当 `temperature > 0` 时，logits 会被缩放：
 
@@ -265,7 +265,7 @@ probs = softmax(logits / temperature)
 
 temperature 越高，分布越平，低概率 token 更容易被采到；temperature 越低，分布越尖锐，输出更确定。
 
-### 6.3 Top-k / Top-p
+### 7.3 Top-k / Top-p
 
 top-k 只在概率最高的 k 个 token 里采样。top-p，也叫 nucleus sampling，会选出累计概率达到 p 的最小候选集合，然后在这个集合里采样。
 
@@ -277,9 +277,9 @@ temperature = 0
 
 或固定 seed。
 
-## 7. Serving 指标详解
+## 8. 原理详解：Serving 指标详解
 
-### 7.1 TTFT
+### 8.1 TTFT
 
 TTFT 是 Time To First Token。它衡量用户多久能看到第一个输出 token。
 
@@ -294,15 +294,25 @@ TTFT 包含：
 
 如果 prompt 很长，prefill 时间会增加；如果队列很深，排队时间会增加；如果 batch 策略等待太久，batching window 也会增加 TTFT。
 
-### 7.2 TPOT
+### 8.2 TPOT
 
 TPOT 是 Time Per Output Token。它衡量 decode 持续生成速度。
 
-粗略地说：
+对一个输出 token 数大于 1 的请求，常见定义是：
 
 ```text
-TPOT = decode 阶段耗时 / 输出 token 数
+TPOT = (端到端延迟 - TTFT) / (输出 token 数 - 1)
 ```
+
+第一个输出 token 已经计入 TTFT，因此分母要减 1。这个指标描述首 token 之后的平均生成间隔。不同 benchmark 对网络开销、空响应和最后一个完成事件的处理可能不同，比较结果前必须先确认定义一致。
+
+本课程当前 benchmark 输出的 `estimated_tpot_s` 是一个简化代理量：
+
+```text
+estimated_tpot_s = 所有请求延迟之和 / 所有输出 token 数
+```
+
+它包含排队、prefill 和首 token 时间，不是标准 TPOT。它只能在请求分布和并发配置相同的实验中作为粗略对比，不能与其他 serving 系统报告的 TPOT 直接比较。
 
 TPOT 受以下因素影响：
 
@@ -313,7 +323,7 @@ TPOT 受以下因素影响：
 - GPU 利用率。
 - 是否有同步或 CPU 调度瓶颈。
 
-### 7.3 End-to-end latency
+### 8.3 End-to-end latency
 
 end-to-end latency 是请求总耗时：
 
@@ -330,7 +340,7 @@ queueing time
 + response overhead
 ```
 
-### 7.4 Throughput
+### 8.4 Throughput
 
 request throughput:
 
@@ -346,13 +356,13 @@ output_tokens_per_s = generated_output_tokens / elapsed_s
 
 LLM serving 中 token throughput 通常更有解释力。因为一个请求生成 8 个 token 和生成 512 个 token，成本完全不同。
 
-### 7.5 Tail latency
+### 8.5 Tail latency
 
 p50 是中位数，p90 表示 90% 请求不超过这个延迟，p99 表示 99% 请求不超过这个延迟。在线系统非常关注 p99，因为用户往往会感知最慢的那批请求。
 
 平均值可能掩盖问题。例如 99 个请求 0.5 秒完成，1 个请求 30 秒完成，平均值看起来可能还能接受，但 p99 会暴露尾部问题。
 
-### 7.6 elapsed_s
+### 8.6 elapsed_s
 
 `elapsed_s` 是一次压测从开始到所有请求完成的墙钟时间。它不是单请求 latency，而是一组请求的总完成时间。
 
@@ -365,7 +375,7 @@ p50 是中位数，p90 表示 90% 请求不超过这个延迟，p99 表示 99% �
 
 说明整组 workload 完成更快。再结合 `requests_per_s` 和 `output_tokens_per_s`，就能说明吞吐提升。
 
-## 8. Batching 的基本动机
+## 9. 原理详解：Batching 的基本动机
 
 GPU 擅长大规模并行计算。单个请求 decode 时，每一步只处理一个 token，计算粒度太小，GPU 可能吃不满。把多个请求合成 batch，可以让同一次 forward 处理更多 token，提高 GPU 利用率。
 
@@ -373,7 +383,7 @@ GPU 擅长大规模并行计算。单个请求 decode 时，每一步只处理�
 
 Week11 会详细讲 continuous batching。Week01 只需要先知道 batching 是为了吞吐，但可能带来排队和尾延迟。
 
-## 9. 在线推理服务的分层视角
+## 10. 原理详解：在线推理服务的分层视角
 
 一个 LLM serving 系统通常可以分成几层理解。
 
@@ -389,9 +399,9 @@ Week11 会详细讲 continuous batching。Week01 只需要先知道 batching 是
 
 用分层视角看系统，后续每周内容就不会散：算子优化发生在模型执行层，KV cache 影响模型执行和显存管理，continuous batching 属于调度层，指标和 profiling 贯穿所有层。
 
-## 10. 本节和后续知识的关系
+## 11. 本节小结
 
-Week01 建立 serving 全局图景。后续周次会逐步把这条链拆开：
+第一周建立 serving 全局图景。后续周次会逐步把这条链拆开：
 
 - Week02: 怎么量化性能和定位瓶颈。
 - Week03-07: 怎么把关键算子写成 CUDA kernel。
@@ -401,8 +411,4 @@ Week01 建立 serving 全局图景。后续周次会逐步把这条链拆开：
 - Week12: 怎么做 admission control 和传输优化。
 - Week13: 怎么估算多卡容量和通信成本。
 
-如果没有理解 prefill、decode、KV cache、TTFT、TPOT，后面所有系统设计都会变成孤立技巧。因此 Week01 的学习重点不是写代码，而是建立正确的 serving 心智模型。
-
-## 11. 实验中的少量对照
-
-第一周的实验会启动一个最小推理服务，并通过一次请求观察 streaming 输出。读代码时只需要把现象和本节概念对应起来：请求如何进入服务、prompt 如何变成 token、prefill 和 decode 如何交替发生、token 如何返回给客户端。
+如果没有理解 prefill、decode、KV cache、TTFT、TPOT，后面所有系统设计都会变成孤立技巧。因此本节学习重点不是写代码，而是建立正确的 serving 心智模型。

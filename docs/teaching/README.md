@@ -1,8 +1,8 @@
 # course-vllm 学习讲义
 
-这个目录放按周学习用的“教材式讲义”，不是实验步骤清单，也不是代码索引。阅读顺序是先理解本周知识，再回到 docs/labs/ 完成对应实验。
+这个目录放按周学习用的“教材式讲义”。讲义的目标是把每周知识讲清楚，尤其照顾基础薄弱的同学：术语第一次出现要解释，公式要说明每个符号，shape 要说明每一维代表什么，系统机制要按步骤展开。
 
-每周讲义都遵守同一个边界：详细讲本周主题本身，不把整门课的内容反复重讲。必要的前置知识只做简短衔接，主体放在本周理论、机制和工程取舍上。项目代码只在末尾作为少量对照出现，不能代替知识讲解。
+每周讲义都遵守同一个边界：先学习概念、背景和原理，再去做练习。这里不代替操作手册，也不代替代码说明；阅读时应该先把“为什么需要这个机制”“这个机制解决什么问题”“它的代价是什么”想清楚。
 
 ## 周次索引
 
@@ -21,7 +21,7 @@
 | Week11 | Continuous batching | `week11_continuous_batching.md` |
 | Week12 | 系统优化与 admission control | `week12_system_optimization.md` |
 | Week13 | 多卡容量规划与并行策略 | `week13_capacity_parallelism.md` |
-| Week14 | AscendC | `week14_ascend_deferred.md` |
+| Week14 | AscendC 概念导读（实验暂缓） | `week14_ascend_deferred.md` |
 | Week15 | 前沿 serving 策略 | `week15_frontier_serving.md` |
 | Week16 | 系统总复习 | `week16_final_review.md` |
 

@@ -1,10 +1,16 @@
 # Week 16: 系统总复习
 
-## 0. 本节学习目标
+## 1. 本周核心问题
 
-Week16 不引入新理论，而是把整个工程重新组织成一条完整 serving 路径。需要能讲清楚自己实现的每个模块在系统里的位置，以及如何用测试和指标证明它工作。
+最后一周不引入新的 isolated concept，而是把整门课的知识串成一个完整推理服务系统。复习重点不是背术语，而是能讲清楚：一个用户请求进入服务后，为什么会经过 tokenizer、prefill、decode、KV cache、sampling、scheduler、CUDA kernel、显存管理和系统保护机制。
 
-## 1. 系统主线
+本周要回答三个问题：
+
+- 一次 LLM serving 请求从输入文本到输出 token，经历了哪些阶段？
+- correctness、latency、throughput、capacity 这些指标分别证明什么？
+- 算子、缓存、调度和多卡策略如何共同决定系统表现？
+
+## 2. 背景知识：系统主线
 
 完整路径：
 
@@ -48,23 +54,43 @@ HTTP request
 
 这条线能证明自己不是只实现了孤立函数，而是理解了完整 serving 系统。
 
-## 2. 最终整理时要说明什么
+复习时可以把系统分成四层：
 
-最终整理时不能只说明模型能聊天，还要回答：
+```text
+协议层: 接收请求，解析参数，返回 streaming 或非 streaming 响应
+调度层: 排队、admission、batching、prefill/decode 调度
+模型层: tokenizer、transformer layer、attention、FFN、sampling
+硬件层: CUDA kernel、显存、KV cache、数据传输、多卡通信
+```
 
-- 请求从 HTTP 到 token 输出经过哪些模块？
-- 哪些代码是自己补的？
-- CUDA kernel 是否真实运行？
-- 哪些测试证明 correctness？
-- batching 是否真的发生？
-- 吞吐和延迟如何变化？
-- 当前实现和工业系统差距在哪里？
+每层都解决不同问题。协议层关注接口语义，调度层关注多请求并发，模型层关注数学计算，硬件层关注性能和资源。一个 serving 系统慢，可能不是模型公式错了，而是排队策略、KV cache 管理、H2D copy、batch size 或多卡通信出了问题。
 
-整理结果时要特别区分 correctness evidence 和 performance evidence。correctness evidence 说明代码算得对，例如 CUDA kernel 对齐 PyTorch reference、paged attention 对齐 dense reference。performance evidence 说明系统表现如何，例如 batching 后 requests/s 和 output_tokens/s 提升、p90 latency 变化、CUDA profiler 显示 kernel 真正运行。
+## 3. 原理详解：如何判断一个系统是否真的正确
 
-这两类证据不能互相替代。模型能输出文本，不等于 CUDA kernel 正确；pytest 通过，也不等于服务吞吐好。
+复习时不能只说“模型能输出文本”。能输出文本只是最表层现象，还需要区分不同证据：
 
-## 3. 系统复习路线
+- correctness evidence: 数学结果是否和 reference 对齐。
+- performance evidence: 延迟、吞吐、GPU timeline 是否符合预期。
+- capacity evidence: 显存预算和 KV cache token slots 是否足够。
+- serving evidence: 多请求并发、streaming、batching、admission 是否按预期工作。
+
+correctness evidence 说明计算结果是对的，例如一个算子的输出能和数学 reference 对齐。performance evidence 说明系统表现如何，例如吞吐、延迟分位数、GPU timeline 和资源利用率。
+
+这两类证据不能互相替代。模型能输出文本，不等于底层计算一定正确；正确性检查通过，也不等于服务吞吐一定好。
+
+要养成这种判断习惯：
+
+```text
+结果对不对？       -> correctness
+单个请求快不快？   -> latency
+并发时吞吐高不高？ -> throughput
+显存够不够？       -> capacity
+高负载会不会崩？   -> admission / overload behavior
+```
+
+这就是工程系统和单个算法函数的区别。单个函数主要验证输入输出；服务系统还要验证多请求、多阶段、多资源之间的相互影响。
+
+## 4. 原理详解：系统复习路线
 
 可以按真实请求路径复习：
 
@@ -81,7 +107,7 @@ HTTP request
 -> streaming or final response
 ```
 
-这比按文件夹机械记忆更清楚，因为它符合真实请求调用链。
+这比按模块名称机械记忆更清楚，因为它符合真实请求的执行过程。
 
 每个模块复习时只需要抓住三个问题：
 
@@ -89,8 +115,45 @@ HTTP request
 - 它维护什么状态或做什么计算？
 - 它把什么输出交给下一个模块？
 
-这样可以防止讲解变成逐行念代码。
+这样可以防止复习变成背名词。学习目标是理解数据如何流动、状态如何变化、资源如何被占用和释放。
 
-## 4. 复习建议
+也可以按性能瓶颈复习：
 
-最后复习时，应能把 correctness、CUDA、serving benchmark、batching stats、容量规划和后续优化方向串成一个完整故事：系统为什么这样设计，怎么证明结果正确，性能瓶颈在哪里，优化带来了什么变化，还有哪些限制。
+```text
+prefill 慢
+-> prompt 很长？
+-> batch 太小？
+-> matmul/attention kernel 利用率低？
+-> 是否有 prefix cache 复用机会？
+
+decode 慢
+-> batch size 太小？
+-> KV cache 读取效率低？
+-> scheduler 是否让 decode 被长 prefill 阻塞？
+-> sampling 是否引入额外开销？
+
+TTFT 高
+-> 请求排队久？
+-> batching window 太长？
+-> prefill 量太大？
+-> admission control 是否允许超长请求挤占系统？
+
+吞吐低
+-> GPU 利用率低？
+-> continuous batching 没有形成大 batch？
+-> H2D copy 或 CPU 调度造成空洞？
+-> 多卡通信开销是否过高？
+```
+
+最后还要按资源复习：
+
+- 计算资源：矩阵乘、attention、FFN、CUDA kernel。
+- 显存资源：weights、KV cache、temporary buffers。
+- 带宽资源：HBM 读写、KV cache 访问、H2D copy、多卡通信。
+- 队列资源：waiting queue、running queue、batch token budget。
+
+一个成熟的 serving 分析通常会把“请求路径”“性能指标”“资源瓶颈”三条线合在一起看。
+
+## 5. 本节小结
+
+最后复习时，应能把 correctness、CUDA、serving benchmark、batching stats、容量规划和后续优化方向串成一个完整故事：系统为什么这样设计，怎么证明结果正确，性能瓶颈在哪里，优化带来了什么变化，还有哪些限制。整门课的核心不是某一个孤立技巧，而是理解算子、缓存、调度、服务接口和 GPU 资源管理如何共同决定 LLM serving 的正确性与性能。
