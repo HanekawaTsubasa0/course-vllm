@@ -29,21 +29,21 @@
 - [第 9 章：在线推理引擎的请求状态与资源生命周期](part3_serving_engine/week09_engine_request_lifecycle.md)
 - [第 10 章：Paged KV Cache 的地址映射与内存管理](part3_serving_engine/week10_paged_kv_block_manager.md)（来源驱动样章）
 - [第 11 章：迭代级调度与 Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
-- [第 12 章：系统优化必须闭环](part3_serving_engine/week12_system_optimization.md)
+- [第 12 章：Host-Device 流水线、准入控制与系统优化证据](part3_serving_engine/week12_system_optimization.md)
 
 这一篇把视角从单次前向扩展到多请求系统：历史状态怎样存放，请求怎样调度，显存怎样分配，优化结论怎样用证据闭环。
 
 ### 第四篇：规模化、异构平台与前沿机制
 
-- [第 13 章：容量规划与并行策略](part4_scale_frontier/week13_capacity_parallelism.md)
+- [第 13 章：推理服务的显存容量、通信成本与并行策略](part4_scale_frontier/week13_capacity_parallelism.md)
 - [第 14 章：Ascend C 编程模型导读](part4_scale_frontier/week14_ascendc_comparison.md)（实验暂缓）
-- [第 15 章：怎样读懂新的 LLM Serving 机制](part4_scale_frontier/week15_frontier_serving.md)
+- [第 15 章：前沿 LLM Serving 机制的 Paper-to-System 分析](part4_scale_frontier/week15_frontier_serving.md)
 
 这一篇讨论单卡之外的问题。Ascend C 当前只做概念对照，不要求硬件实验；前沿专题强调从论文主张追到系统状态、资源变化和评价指标。
 
 ### 第五篇：系统综合
 
-- [第 16 章：把 LLM Serving 系统讲成一条证据链](part5_synthesis/week16_final_review.md)
+- [第 16 章：LLM Serving 系统优化的证据链与综合推理](part5_synthesis/week16_final_review.md)
 
 最后一篇把正确性、接入、性能、容量和可靠性证据组织成完整的系统论证。
 
@@ -58,4 +58,4 @@
 
 ## 当前状态
 
-第 3 章和第 10 章是第一批来源驱动样章，分别验证“GPU 算子课”和“推理系统课”两种写法。两章以官方文档和原始论文支撑通用结论，以课程源码说明教学实现，并在相关论述之后就近给出链接。其余章节暂时保留上一版正文作为素材，后续按 `BOOK_PLAN.md` 的依赖顺序重写。
+除暂缓实验开发的第 14 章外，第 1 至 13、15、16 章均已形成来源驱动初稿。各章以原始论文和官方文档支撑通用结论，以课程源码解释教学实现；全书完成后还需统一复核术语、数学符号、交叉引用和 PPT 素材。

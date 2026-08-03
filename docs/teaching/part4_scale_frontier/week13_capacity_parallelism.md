@@ -1,6 +1,6 @@
-# Week 13：一张 GPU 能服务多少请求，什么时候才值得加卡
+# 第 13 章：推理服务的显存容量、通信成本与并行策略
 
-## 容量规划不是“显存除以模型大小”
+## 13.1 容量约束与性能约束
 
 一张 24GB GPU，模型权重 2GB，能否说还剩 22GB 全部给 KV cache？不能。
 
@@ -24,7 +24,7 @@ allocator metadata 与碎片
 
 ---
 
-## 一、先统一单位
+## 13.2 GB、GiB 与数据类型字节数
 
 厂商常用十进制 GB：
 
@@ -40,7 +40,7 @@ allocator metadata 与碎片
 
 24 GB 约等于 22.35 GiB。报告中混用会产生约 7% 偏差。课程公式统一标明单位，不把 `GB` 和 `GiB` 当成同义词。
 
-## 二、显存账本
+## 13.3 GPU 显存账本
 
 ```mermaid
 flowchart TB
@@ -51,7 +51,7 @@ flowchart TB
     T --> F["Fragmentation / safety"]
 ```
 
-### 权重
+### 13.3.1 模型权重
 
 粗估：
 
@@ -67,15 +67,15 @@ weight_bytes = num_parameters * bytes_per_parameter
 
 量化后不能简单按 0.5 bytes/param 结束，还要加 scale、zero point、packing 对齐和某些未量化层。
 
-### Activation
+### 13.3.2 Activation
 
 推理不保存训练反向所需全部 activation，但 prefill 中间 tensor、logits、attention workspace 仍会随 batch/sequence 变化。
 
-### Workspace 与碎片
+### 13.3.3 Workspace、Allocator 与碎片
 
 库算法、NCCL、CUDA Graph、allocator 都可能占用额外空间。规划时使用可用比例和 safety margin，最后以实测峰值校准。
 
-## 三、KV Cache 每 Token 成本
+## 13.4 KV Cache 的单 Token 成本
 
 ```text
 kv_bytes_per_token
@@ -111,7 +111,7 @@ bf16=2 bytes
 
 GQA/MQA 减少 `kv_heads`，因此显著影响 serving 容量。
 
-## 四、从显存预算到 Token Slots
+## 13.5 从 KV Budget 到 Token Slots
 
 假设按 GiB：
 
@@ -138,7 +138,7 @@ token_slots ≈ 17.4 GiB / 112 KiB
 
 这与课程 planner 的典型结果约 162,896 slots 同量级，block 向下取整会造成少量差异。
 
-## 五、Paged KV 的 Block 取整
+## 13.6 Paged KV 的 Block 取整
 
 Block size=16：
 
@@ -150,7 +150,7 @@ token_slots = num_blocks * 16
 
 Block 取整意味着不能使用最后不足一个 block 的预算；请求最后 block 还有内部碎片。因此公式结果是理想上界附近，不是可承诺并发。
 
-## 六、Token Slots 不等于请求数
+## 13.7 从 Token Slots 到请求并发
 
 如果每个请求都满 2048：
 
@@ -168,19 +168,19 @@ full_length_concurrency = floor(162896/2048) = 79
 
 并发上限由所有活跃 context 总和决定。还要给未来 decode 增长留余量，否则接纳时能放下，生成中途 OOM。
 
-### 平均值的风险
+### 13.7.1 长度分布与平均值风险
 
 用平均 context 估算期望容量可以，但 admission 还需考虑尾部分布和最大请求。少量 32k 请求可能吞掉大量 blocks。
 
-## 七、容量与速度是两个约束
+## 13.8 容量上限与 SLO 并发上限
 
 显存允许 79 个满长请求，不代表能同时以可接受 TPOT 服务 79 个请求。
 
-### Prefill
+### 13.8.1 Prefill 计算约束
 
 目标：prompt throughput 与 TTFT。长序列 attention、GEMM 和 queueing 共同限制。
 
-### Decode
+### 13.8.2 Decode 带宽与迭代约束
 
 目标：output tokens/s 与 TPOT。每轮 batch、KV bandwidth、kernel launch 和通信共同限制。
 
@@ -193,7 +193,7 @@ full_length_concurrency = floor(162896/2048) = 79
 
 SLO 内的最大并发通常低于纯显存上限。
 
-## 八、什么时候考虑多卡
+## 13.9 多卡扩展的触发条件
 
 ```mermaid
 flowchart TB
@@ -207,7 +207,9 @@ flowchart TB
 
 多副本常被忽略：如果单卡能放下模型，增加独立 replicas 可以分摊不同请求，避免每 token 层内通信。它不加速单请求，却可能是提高总吞吐的更简单方案。
 
-## 九、通信性能的两个组成
+## 13.10 Collective 通信的延迟与带宽模型
+
+NCCL collective 在多个 ranks 之间执行数据交换或归约；不同 collective 的输出分布不同，不能都用“同步”一词代替。[NCCL collective operations](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html)给出了 all-reduce、all-gather、reduce-scatter 与 all-to-all 的 buffer 语义。
 
 通信时间常简化为：
 
@@ -219,11 +221,11 @@ T_comm ≈ latency_alpha + bytes / effective_bandwidth
 
 理论链路带宽不是 effective bandwidth。拓扑、collective 算法、竞争和软件栈都会降低实际值。
 
-## 十、Tensor Parallelism
+## 13.11 Tensor Parallelism
 
-TP 把同一层矩阵分到多卡。
+TP 把同一层矩阵分到多卡。[Megatron-LM](https://arxiv.org/abs/1909.08053)通过 column-parallel 与 row-parallel 线性层组织 Transformer 层内的张量并行，并在相邻算子之间安排必要 collective。本节使用同一分解说明推理通信，不直接采用论文的训练吞吐结果。
 
-### Column Parallel Linear
+### 13.11.1 Column-Parallel Linear
 
 按输出列切 weight：
 
@@ -235,7 +237,7 @@ GPU1: Y1 = XW1
 
 若下一操作可消费分片，暂时无需 gather；否则要 all-gather。
 
-### Row Parallel Linear
+### 13.11.2 Row-Parallel Linear
 
 按输入维切：
 
@@ -257,13 +259,13 @@ flowchart LR
     AR --> Y["consistent/sharded output"]
 ```
 
-### TP 收益
+### 13.11.3 TP 的容量与计算收益
 
 - 每卡权重下降；
 - 单层计算分摊；
 - 可能降低单请求计算时间。
 
-### TP 代价
+### 13.11.4 TP 的 Collective 代价
 
 - 层内频繁 collective；
 - 多卡同步，慢卡拖累；
@@ -272,7 +274,7 @@ flowchart LR
 
 Batch 很小、模型不大时，计算缩短可能抵不过通信。
 
-## 十一、TP 通信量怎样估
+## 13.12 TP 通信量的规划估算
 
 若某 all-reduce tensor 有：
 
@@ -291,9 +293,9 @@ Ring all-reduce 每 rank 传输量近似与：
 
 Decode 每轮 `batch_tokens≈active_sequences`；单次 tensor 不一定大，但 layers*steps 次数非常多。应同时报告 bytes/token 和 collectives/token。
 
-## 十二、Pipeline Parallelism
+## 13.13 Pipeline Parallelism
 
-PP 按层切 stage：
+PP 按层切 stage。[GPipe](https://arxiv.org/abs/1811.06965)使用 micro-batches 填充按层划分的流水线；在线推理的到达过程、decode 迭代和延迟目标与其训练场景不同，因此这里只采用 stage 与 bubble 的基本模型：
 
 ```text
 GPU0: layers 0..11
@@ -309,7 +311,7 @@ GPU1: layers 12..23
 - microbatch 少时 pipeline bubble；
 - 在线动态请求使流水填充更难。
 
-### Bubble 粗估
+### 13.13.1 Pipeline Bubble 的近似估算
 
 对 p 个 stages、m 个 microbatches，简单流水效率近似：
 
@@ -320,7 +322,7 @@ bubble_fraction ≈ (p - 1)/(m + p - 1)
 
 当 m 很小，bubble 大。Decode 延迟敏感时不能照搬训练中大量 microbatch 的结论。
 
-## 十三、TP 与 PP 怎样组合
+## 13.14 TP 与 PP 的组合
 
 大模型可能：
 
@@ -332,7 +334,7 @@ TP=4, PP=2 -> 8 GPUs
 
 选择前先问单一策略是否足够，避免为了“多种并行都用上”而组合。
 
-## 十四、Expert Parallelism
+## 13.15 Expert Parallelism
 
 MoE 的专家分布到不同 GPU。Router 决定每 token 去哪些 experts。
 
@@ -354,7 +356,7 @@ EP 收益来自只激活少数 experts，并分摊专家权重。风险：
 
 Dense 模型没有 experts，不能因 EP 听起来先进就使用。
 
-## 十五、Context Parallelism
+## 13.16 Context Parallelism
 
 CP 把 sequence/context 维分到多卡，用于超长上下文。
 
@@ -373,7 +375,7 @@ Attention 需要跨 shard 获得足够 K/V 或传递在线 softmax 状态。Ring
 
 CP 与 TP 切分维度不同，可以组合，但通信拓扑更复杂。
 
-## 十六、推理并行与训练并行不能直接等同
+## 13.17 训练并行与推理并行的目标差异
 
 训练：
 
@@ -392,23 +394,23 @@ CP 与 TP 切分维度不同，可以组合，但通信拓扑更复杂。
 
 训练中高效的并行配置，不一定适合在线推理。
 
-## 十七、量化如何进入容量模型
+## 13.18 量化对容量模型的影响
 
-### 权重量化
+### 13.18.1 权重量化
 
 减少 weight memory，可能让单卡放下模型或给 KV 留更多空间。要加入 scale/metadata 与 workspace。
 
-### KV 量化
+### 13.18.2 KV 量化
 
 直接减少 bytes_per_token，提高 slots，但需支持低精度 cache read/write 和 attention kernel，并验证长上下文质量。
 
-### 速度不自动提升
+### 13.18.3 容量下降不保证延迟下降
 
 如果硬件/内核不能高效执行量化格式，dequant 成本可能抵消带宽收益。
 
-## 十八、一份完整容量规划流程
+## 13.19 容量与并行规划流程
 
-### 1. 输入
+### 13.19.1 模型、硬件与 Workload 输入
 
 ```text
 GPU memory/topology/bandwidth
@@ -420,69 +422,69 @@ target concurrency
 TTFT/TPOT SLO
 ```
 
-### 2. 静态显存
+### 13.19.2 静态显存
 
 权重 + 已知 runtime reserved。
 
-### 3. KV Budget
+### 13.19.3 KV Budget
 
 使用可用比例和 safety，计算 block/token slots。
 
-### 4. Workload 并发
+### 13.19.4 Workload 并发
 
 用 active context 分布而非只用 max length，给增长留余量。
 
-### 5. 单卡 Benchmark
+### 13.19.5 单卡 Benchmark
 
 在目标长度/并发测 TTFT、TPOT、tokens/s、peak memory。
 
-### 6. 瓶颈分类
+### 13.19.6 瓶颈分类
 
 容量、compute、HBM、queue 或 network。
 
-### 7. 候选方案
+### 13.19.7 候选方案
 
 降长度/并发、paged/quantized KV、更大 GPU、replicas、TP/PP/CP/EP。
 
-### 8. 通信估算与实测
+### 13.19.8 通信估算与实测
 
 计算 bytes/collectives/bubble，再用实际拓扑 benchmark 校准。
 
-### 9. 留安全余量
+### 13.19.9 安全余量
 
 避免按理论 100% 运行；考虑流量波动、碎片和版本变化。
 
-## 二十、常见误区
+## 13.20 容量与并行结论的适用边界
 
-### 24GB GPU 就有 24GiB 可用
+### 13.20.1 标称 24 GB 不等同于 24 GiB 可分配空间
 
 单位不同，runtime 也不能全部用于 tensor。
 
-### Token slots 除以 max length 就是可承诺并发
+### 13.20.2 Token Slots 不能直接换算承诺并发
 
 还需考虑碎片、增长、workspace 和 SLO。
 
-### 多卡一定降低延迟
+### 13.20.3 多卡不保证降低延迟
 
 计算减少同时引入 collective/stage 通信，小 batch decode 可能更慢。
 
-### 单卡放不下就只能 TP
+### 13.20.4 单卡容量不足不只存在 TP 方案
 
 也可 PP、量化、更大显存，具体取决于层/矩阵与目标。
 
-### 吞吐不足就增加 TP
+### 13.20.5 Replica 与 TP 解决不同扩展目标
 
 若模型单卡可放下，多 replicas 可能避免层内通信并获得更好总吞吐。
 
-### 训练并行配置可直接用于推理
+### 13.20.6 训练并行配置不能直接移植到推理
 
 推理 KV、动态请求和 latency 约束不同。
 
-### 理论带宽就是有效带宽
+### 13.20.7 理论链路带宽不是 Collective 有效带宽
 
 Collective 算法、拓扑和竞争会降低实际性能。
 
-## 二十一、学完本周，应能回答
+## 13.21 本章小结与思考题
 
 1. 显存账本包含哪些项目？
 2. GB/GiB 混用会造成什么问题？
@@ -495,14 +497,13 @@ Collective 算法、拓扑和竞争会降低实际性能。
 9. EP/CP 分别适合什么模型或 workload？
 10. 何时多 replicas 比 TP 更合理？
 
-## 参考与素材说明
+## 13.22 参考资料
 
-- 猛猿：[张量模型并行 TP：Megatron-LM](https://zhuanlan.zhihu.com/p/622212228)
-- 猛猿：[流水线并行 PP：GPipe](https://zhuanlan.zhihu.com/p/613196255)
-- 猛猿：[Megatron Context Parallel](https://zhuanlan.zhihu.com/p/5502876106)
-- 猛猿：[DeepSpeed-Megatron MoE 并行](https://zhuanlan.zhihu.com/p/681154742)
-- 猛猿：[TP 计算通信 overlap](https://zhuanlan.zhihu.com/p/16594218518)
-- 猛猿：[DistServe](https://zhuanlan.zhihu.com/p/706761664)
-- 课程工程：capacity planner 与 Week 13 报告模板
+- Shoeybi 等：[Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism](https://arxiv.org/abs/1909.08053)
+- Narayanan 等：[Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473)
+- Huang 等：[GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism](https://arxiv.org/abs/1811.06965)
+- NVIDIA：[NCCL Collective Operations](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html)
+- vLLM：[Parallelism and Scaling](https://docs.vllm.ai/en/latest/serving/parallelism_scaling/)
+- 课程工程：[`capacity_planner.py`](../../../course_vllm/benchmarks/capacity_planner.py) 与 [`week13_capacity_planning_template.md`](../../reports/week13_capacity_planning_template.md)
 
-正文、容量算例、决策图和实验均为课程原创组织。通信公式是规划近似，最终结论必须用目标硬件拓扑、collective 库和真实 workload 校准。
+本章中的通信公式是规划近似，最终结论必须用目标硬件拓扑、collective 库和真实 workload 校准。

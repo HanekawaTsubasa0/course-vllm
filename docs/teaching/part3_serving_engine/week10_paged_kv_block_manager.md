@@ -53,11 +53,11 @@ Paged KV cache 并未消除全部空间开销，而是将连续大块预留和�
 
 分页寻址涉及以下五个对象。课程中统一使用这些名称，以避免将逻辑块、物理块和 CUDA thread block 混为一谈。vLLM 的设计文档也明确区分 KV cache block 与 GPU thread block。[vLLM：Paged Attention](https://docs.vllm.ai/en/latest/design/paged_attention/)
 
-### Logical token position
+### 10.2.1 Logical Token Position
 
 Token 在某条 sequence 中的位置。A 的第 6 个 token 和 B 的第 6 个 token 都可以叫 position 6，但它们属于不同 sequence。
 
-### Logical block
+### 10.2.2 Logical Block
 
 将逻辑位置按 `block_size` 分组：
 
@@ -65,7 +65,7 @@ Token 在某条 sequence 中的位置。A 的第 6 个 token 和 B 的第 6 个 
 logical_block = position // block_size
 ```
 
-### Offset in block
+### 10.2.3 Offset in Block
 
 Token 在逻辑块内的位置：
 
@@ -73,11 +73,11 @@ Token 在逻辑块内的位置：
 offset = position % block_size
 ```
 
-### Physical block
+### 10.2.4 Physical Block
 
 KV pool 中真正拥有存储空间的块，由一个整数 ID 标识。Logical block 2 不必存入 physical block 2。
 
-### Physical slot
+### 10.2.5 Physical Slot
 
 物理块中的具体 token 位置：
 
@@ -359,7 +359,7 @@ Scheduler 再决定等待、抢占、淘汰可缓存块或拒绝请求。内存�
 
 分页系统的地址错误未必触发进程异常，因此测试需要验证状态不变量，而不只是最终 tensor shape。
 
-### 地址不变量
+### 10.11.1 地址不变量
 
 对任意有效 position：
 
@@ -371,19 +371,19 @@ slot = block_table[logical_block] * block_size + offset
 
 采用 `[7,2,9]` 这类非顺序 table，可以识别直接使用 logical block ID、绕过映射的错误；顺序 table `[0,1,2]` 无法覆盖这一情形。
 
-### 容量不变量
+### 10.11.2 容量不变量
 
 每个活跃 table 的块都有正引用；每个可普通分配的 free block 引用数为 0；同一 block 不能在 free list 中重复出现。
 
-### 生命周期不变量
+### 10.11.3 生命周期不变量
 
 释放一个共享者只能减少引用，不能破坏其他 sequence；最后一个引用释放后，容量统计必须恢复。不同释放顺序应得到同样的最终状态。
 
-### 数值不变量
+### 10.11.4 数值不变量
 
 给每个逻辑 position 写入可识别的 K/V，经 paged 地址读取后，逻辑顺序必须与 dense reference 一致。进一步把同一 Q 与两种 K/V 表示送入 Attention，输出应在容差内一致。
 
-### 边界集合
+### 10.11.5 边界测试集合
 
 ```text
 length = 0
@@ -411,13 +411,13 @@ length = block_size + 1
 
 最终吞吐和延迟取决于节省的显存和增加的并发能否覆盖寻址与元数据成本。Block size 因而需要结合请求长度分布、Attention kernel 和 SLO 选择，不能仅依据碎片率确定。
 
-## 章末小结
+## 10.13 本章小结
 
 Paged KV cache 通过 block table 将 sequence 的逻辑 token 顺序映射到固定大小的物理块。BlockManager 维护地址映射、所有权和容量元数据，PagedKVCache 保存实际 K/V tensor，Attention kernel 根据映射读取历史状态。
 
 实现必须同时维持三类不变量：逻辑 position 到 physical slot 的地址映射正确；独占块和共享块的引用关系正确；有效 token、已分配 slot 和空闲块的容量统计一致。三者共同保证分页只改变物理布局而不改变 Attention 数学结果。
 
-## 思考题
+## 10.14 思考题
 
 1. `block_size=8`、`block_table=[5,1,7]` 时，position 18 对应哪个 physical slot？
 2. 两条 sequence 的 logical block 0 为什么可以映射到不同物理块？
@@ -430,7 +430,7 @@ Paged KV cache 通过 block table 将 sequence 的逻辑 token 顺序映射到�
 9. Paged Attention 数学结果不变，性能却可能变化，变化来自哪些系统因素？
 10. 如果 block size 减半，至少列出两项收益和三项成本。
 
-## 参考资料
+## 10.15 参考资料
 
 - [Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, SOSP 2023](https://arxiv.org/abs/2309.06180)：PagedAttention、block table、内存管理和系统评测。
 - [vLLM：Paged Attention](https://docs.vllm.ai/en/latest/design/paged_attention/)：当前 Paged Attention kernel 的设计说明。
