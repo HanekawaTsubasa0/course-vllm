@@ -1,20 +1,20 @@
-# 第 3 章：一个 PyTorch Tensor 怎样走进 CUDA Kernel
+# 第 3 章：PyTorch CUDA Extension 的执行模型
 
-在 Python 里写下 `a + b` 只需要三个字符。把同一个加法写成自定义 CUDA 算子，却要经过 Python、C++、CUDA runtime 和 GPU 四个世界。多出来的代码没有改变数学，它解决的是另一类问题：谁检查输入，谁决定并行规模，谁持有内存地址，错误在哪一层报告，以及怎样证明 GPU 确实执行了自己的程序。
+PyTorch 已经提供了大量张量算子，但模型实现仍可能需要框架尚未提供的运算，或需要把若干运算融合为一个专用 kernel。PyTorch 官方教程将 C++/CUDA custom operator 作为这类需求的标准扩展路径，并将算子注册、后端实现和正确性检查视为一个完整接口，而不只是单独编译一段 CUDA 代码。[PyTorch：Custom C++ and CUDA Operators](https://docs.pytorch.org/tutorials/advanced/cpp_custom_ops.html)
 
-本章只研究向量加法：
+本章以向量加法为最小案例：
 
 ```text
 out[i] = a[i] + b[i]
 ```
 
-选择这个近乎没有数学难度的算子，是为了把所有注意力放在执行链路上。RMSNorm 会增加归约，GEMM 会增加数据复用，Attention 会增加复杂 shape；如果第一次接触 CUDA 时同时引入这些问题，程序出错后很难判断究竟是公式、索引、同步还是绑定层出了问题。
+该算子的数学定义十分简单，因而适合单独考察软件栈和执行模型。与后续的 RMSNorm、GEMM 和 Attention 相比，向量加法不涉及归约、片上数据复用或复杂张量形状。若输出不正确，可以将原因集中在输入约束、索引映射、绑定接口和启动配置，而不必同时排查算法公式。
 
-读完本章，应当能够从一个 `torch.Tensor` 出发，解释它怎样到达一个具体 GPU 线程；也应当能够区分“结果正确”“CUDA 路径被调用”和“kernel 性能测量正确”这三个不同命题。
+本章的学习目标包括：说明 `torch.Tensor` 从 Python 接口到 CUDA kernel 的调用路径；推导一维数据的线程索引与边界条件；分析向量加法的访存特征；区分数值正确性、后端分派正确性和性能测量有效性。
 
-## 3.1 先追踪一次真实调用
+## 3.1 自定义算子的调用路径
 
-课程工程中最小的 CUDA 示例位于 [kernels/vector_add.cu](../../../kernels/vector_add.cu)。先不讨论语法，顺着控制流读一遍：
+课程工程中的最小 CUDA 示例位于 [kernels/vector_add.cu](../../../kernels/vector_add.cu)。其 host 端入口如下：
 
 ```cpp
 torch::Tensor vector_add(torch::Tensor a, torch::Tensor b) {
@@ -34,7 +34,7 @@ torch::Tensor vector_add(torch::Tensor a, torch::Tensor b) {
 }
 ```
 
-这段 host code 做了四件事：验证输入；创建输出 tensor；取得三块显存的地址；启动 kernel。真正逐元素相加的代码只有：
+该函数依次完成输入验证、输出分配、设备地址提取和 kernel launch。逐元素计算由 device 函数完成：
 
 ```cpp
 __global__ void vector_add_kernel(
@@ -46,7 +46,7 @@ __global__ void vector_add_kernel(
 }
 ```
 
-一次调用可以画成四层边界：
+由此可以将调用路径划分为四层：
 
 ```mermaid
 flowchart LR
@@ -56,9 +56,9 @@ flowchart LR
     K --> O["输出 Tensor<br/>仍由 PyTorch 管理生命周期"]
 ```
 
-这张图是后面所有自定义算子的骨架。算子变复杂时，变化主要发生在输入约束、launch 参数和 kernel body，四层职责并不会消失。
+PyTorch 的 `torch.utils.cpp_extension` 可以将 C++ 与 CUDA 源文件编译并链接为可加载模块；CUDA 源文件中的 kernel 通常仍需由 C++ 函数启动，再通过绑定暴露给 Python。[PyTorch：torch.utils.cpp_extension](https://docs.pytorch.org/docs/stable/cpp_extension.html) 后续算子的输入约束、启动参数和 kernel body 会发生变化，但上述分层关系保持不变。
 
-## 3.2 Tensor 不是一份“传给 GPU 的数组”
+## 3.2 Tensor 元数据与设备存储
 
 `torch.Tensor` 是一个带元数据的对象。它至少描述数据位于哪个 device、元素类型、每一维的大小和 stride、底层 storage 地址，以及谁管理这块 storage 的生命周期。
 
@@ -68,9 +68,9 @@ flowchart LR
 2. 指针类型必须和真实 dtype 一致；
 3. kernel 对下标的解释必须符合 tensor 的布局。
 
-如果一个非连续 tensor 被当作连续数组读取，地址本身仍然合法，结果却可能错误。因此生产代码通常拒绝非连续输入，或者先调用 `.contiguous()` 得到符合 kernel 预期的布局。课程的通用包装层采用后一种方式，可在 [course_vllm/kernels/cuda_ops.py](../../../course_vllm/kernels/cuda_ops.py) 中看到。
+若非连续 tensor 被当作连续数组读取，底层地址仍可能合法，但线性下标不再对应预期元素。实现通常选择拒绝非连续输入，或先调用 `.contiguous()` 生成符合 kernel 布局约定的 tensor。课程的通用包装层采用后一种方式，见 [course_vllm/kernels/cuda_ops.py](../../../course_vllm/kernels/cuda_ops.py)。
 
-### Python、C++ 和 kernel 各检查什么
+### 不同接口层的约束
 
 检查应放在最了解约束的边界：
 
@@ -81,9 +81,9 @@ flowchart LR
 | CUDA launcher | grid/block、shared memory、launch error | 业务层 fallback |
 | CUDA kernel | 当前线程下标、局部边界、并行计算 | 抛出 Python 异常 |
 
-把所有检查都塞进 Python 会让 C++ API 仍可被错误调用；把所有检查都推给 kernel，则错误难以定位，也会让设备代码承担不必要的控制逻辑。
+仅在 Python 层检查不能保护可被独立调用的 C++ 接口；将检查全部推迟到 kernel 又会降低错误的可诊断性。因此，约束应在最接近其语义的接口层验证。
 
-## 3.3 一百万次加法怎样分给线程
+## 3.3 CUDA 执行层次与一维索引
 
 CPU 循环把时间看成主要组织维度：
 
@@ -91,7 +91,7 @@ CPU 循环把时间看成主要组织维度：
 i=0 -> i=1 -> i=2 -> ... -> i=n-1
 ```
 
-GPU 则先创建一批逻辑线程，再让不同线程处理不同下标。CUDA 使用三级执行结构：一次 kernel launch 产生一个 grid，grid 包含若干 block，block 包含若干 thread。
+GPU 程序以大量逻辑线程组织数据并行。CUDA kernel 的一次启动产生一个 grid；grid 由 thread block 组成，每个 block 再包含若干 thread。NVIDIA 的编程指南将 kernel、thread hierarchy 和 memory hierarchy 作为 CUDA 编程模型的基本组成部分。[NVIDIA：CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html)
 
 对于一维向量，线程的全局编号通常写成：
 
@@ -101,7 +101,7 @@ idx = blockIdx.x * blockDim.x + threadIdx.x
 
 `threadIdx.x` 是线程在当前 block 中的位置，`blockIdx.x` 是 block 在 grid 中的位置，`blockDim.x` 是每个 block 的线程数。
 
-### 一个不能跳过的手算：n = 1000
+### 索引实例：n = 1000
 
 设 `blockDim.x = 256`。需要的 block 数是：
 
@@ -120,11 +120,11 @@ num_blocks = ceil(1000 / 256)
 | 2 | 0..255 | 512..767 | 256 |
 | 3 | 0..255 | 768..1023 | 232 |
 
-最后 24 个线程得到 `idx=1000..1023`。它们是真实存在的线程，却没有对应数据，所以必须被 `if (idx < n)` 挡住。边界判断不是性能装饰，而是内存安全条件。
+最后 24 个线程的 `idx` 为 1000 至 1023，不对应有效输入元素，必须由 `if (idx < n)` 排除。该判断构成 kernel 的内存安全条件。
 
 最后一个 warp 中会有部分线程失活，但代价只发生在数据末尾。为了消除这条判断而要求输入长度必须是 256 的整数倍，通常是不合理的接口设计。
 
-## 3.4 Thread 是编程单位，Warp 是执行单位
+## 3.4 Warp 执行与分支发散
 
 程序员为 thread 编写代码，NVIDIA GPU 通常以 32 个线程组成的 warp 调度指令。一个 warp 中的线程执行同一条指令，但读写各自的数据，这种模式称为 SIMT（Single Instruction, Multiple Threads）。
 
@@ -138,11 +138,11 @@ if (idx % 2 == 0) {
 }
 ```
 
-同一 warp 中奇数线程和偶数线程选择不同路径。硬件通常需要分别执行两条路径，并在每次执行时屏蔽另一部分线程。这称为分支发散。它不意味着 CUDA 不能写 `if`，而是意味着分支成本取决于一个 warp 内线程的选择是否一致。
+同一 warp 中奇数线程和偶数线程选择不同路径时，warp 需要依次执行被选择的分支路径，并屏蔽当次不参与的线程，这一现象称为分支发散。CUDA Programming Guide 将 warp 描述为由连续 thread ID 组成的调度单位；同一 warp 的线程选择不同路径时，各路径分别执行，而不同 warp 彼此独立。[NVIDIA：SIMT Architecture](https://docs.nvidia.com/cuda/archive/13.0.0/cuda-c-programming-guide/index.html#simt-architecture)
 
 Block 还提供了 warp 之外的合作边界。同一 block 内的线程可以通过 shared memory 交换数据，并使用 `__syncthreads()` 做 block 内同步；不同 block 之间不能靠这条指令同步。因此需要全 grid 同步的算法往往拆成多个 kernel launch。
 
-## 3.5 Vector Add 的瓶颈不在加法器
+## 3.5 算术强度与全局内存访问
 
 对每个 float32 元素，kernel 做：
 
@@ -159,9 +159,9 @@ Block 还提供了 warp 之外的合作边界。同一 block 内的线程可以�
 AI ≈ 1 FLOP / 12 bytes ≈ 0.083 FLOP/byte
 ```
 
-这是一个很低的数值。即使 GPU 有强大的浮点计算单元，kernel 也更可能受显存带宽限制。把数据先搬到 shared memory 并不会自动变快，因为每个输入只使用一次，搬运反而增加了指令和同步。
+该算术强度很低，kernel 更可能受到显存带宽而非浮点吞吐限制。由于每个输入元素只被使用一次，将其先复制到 shared memory 不会增加数据复用，反而增加搬运和同步开销。
 
-### 相邻线程为什么应访问相邻地址
+### 合并访问
 
 当一个 warp 访问 `a[idx]` 时，线程 0、1、2……请求连续地址。硬件可以把这些访问合并成较少的内存事务，这称为 coalesced access。
 
@@ -172,7 +172,7 @@ thread 2 -> a[2]
 ...
 ```
 
-如果线程按很大的 stride 或无规律地址读取，同样的数据量可能产生更多内存事务。线程数量相同不代表内存效率相同；下标映射同时决定正确性和访存形态。
+若线程以较大 stride 或离散地址访问，同样的数据量可能产生更多内存事务。CUDA Best Practices Guide 将 global memory coalescing 列为高优先级优化要求：一个 warp 的 load/store 会尽可能合并为较少的内存事务。[NVIDIA：Coalesced Access to Global Memory](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#coalesced-access-to-global-memory)
 
 | 存储层次 | 主要作用域 | 典型用途 | 在 vector add 中 |
 | --- | --- | --- | --- |
@@ -180,7 +180,7 @@ thread 2 -> a[2]
 | Shared memory | 单 block | tile 复用、block 内归约 | 没有复用，通常不需要 |
 | Global memory | 整个 device | tensor、权重、KV cache | 读取两个输入并写出结果 |
 
-## 3.6 Launch 之后，CPU 为什么已经往下走了
+## 3.6 异步执行与计时边界
 
 CUDA kernel launch 通常是异步的。CPU 把工作提交到 stream 后可以继续执行，GPU 稍后完成实际计算：
 
@@ -197,11 +197,11 @@ sequenceDiagram
     G-->>C: 确认完成或报告错误
 ```
 
-异步执行带来两个常见误判。
+这种执行方式带来两个测量和调试问题。
 
 第一，直接用 CPU 墙钟包住函数调用，测到的可能主要是 enqueue 时间，而不是 GPU 执行时间。第二，非法显存访问可能在后续同步点才报告，traceback 因而指向一行看似无关的 Python。
 
-调试阶段可以加入同步，让错误靠近发生位置；性能路径则不能随意同步，否则会破坏 CPU/GPU 重叠。课程的 [benchmark_cuda](../../../course_vllm/kernels/harness.py) 使用 CUDA Event，并在测量边界同步：
+调试阶段可以在明确位置同步，使设备错误接近其发生位置；性能路径中的额外同步则可能破坏 CPU/GPU 重叠。CUDA Best Practices Guide 指出，使用 CPU 计时器测量异步 CUDA 调用时必须设置正确的同步边界，也可以使用 CUDA Event 在设备时间线上计时。[NVIDIA：CUDA 执行时间测量](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#timing) 课程的 [benchmark_cuda](../../../course_vllm/kernels/harness.py) 使用 CUDA Event，并在测量边界同步：
 
 ```python
 for _ in range(warmup):
@@ -217,7 +217,7 @@ torch.cuda.synchronize()
 
 Warmup 用于排除 JIT 编译、CUDA context、allocator 和缓存冷启动。这里测得的是稳态重复执行的平均时间，不是服务请求的端到端延迟。
 
-## 3.7 JIT Extension 到底编译了什么
+## 3.7 JIT Extension 的编译过程
 
 PyTorch 的 C++/CUDA extension 可以在第一次调用时完成：
 
@@ -229,7 +229,7 @@ PyTorch 的 C++/CUDA extension 可以在第一次调用时完成：
 -> Python 可导入模块
 ```
 
-工程中的 [load_cuda_extension](../../../course_vllm/kernels/harness.py) 会定位源码、设置编译参数并缓存加载结果。修改源码、编译选项、PyTorch/CUDA 版本或 extension 名称，都可能让缓存失效。
+工程中的 [load_cuda_extension](../../../course_vllm/kernels/harness.py) 定位源码、设置编译参数并缓存加载结果。PyTorch 的 `load()` 接口会从指定源文件构建动态库并将其加载为 Python 模块；源码、编译选项和目标架构都会影响构建产物。[PyTorch：JIT loading extensions](https://docs.pytorch.org/docs/stable/cpp_extension.html#torch.utils.cpp_extension.load)
 
 因此必须分开三个时间尺度：
 
@@ -239,7 +239,7 @@ PyTorch 的 C++/CUDA extension 可以在第一次调用时完成：
 
 把第一次 `pytest` 的总耗时称为“kernel latency”，会把完全不同的阶段混在一起。
 
-## 3.8 “输出一样”还不能证明接入成功
+## 3.8 正确性、分派与性能证据
 
 假设系统支持三种 dispatch：
 
@@ -249,7 +249,7 @@ auto   CUDA 可用时尝试自定义 kernel，失败后允许回退
 cuda   强制走自定义 kernel，失败立即报错
 ```
 
-`auto` 对跨环境运行很有用，但它可能掩盖接入错误：extension 编译失败，程序回退到 `torch.add`，最终数值仍然正确。
+`auto` 便于同一工程跨环境运行，但也可能掩盖接入错误。例如 extension 编译失败后回退到 `torch.add`，最终数值仍然正确。
 
 因此一个 CUDA 算子有三层证据：
 
@@ -267,7 +267,7 @@ n = 1, 255, 256, 257, 1000, 1024, 1025
 
 浮点算子通常用 `torch.testing.assert_close`，而不是要求逐 bit 相等。后续归约和矩阵乘会因为累加顺序不同产生舍入差异，容差应根据 dtype 和运算规模解释，不能为了让测试通过而任意放宽。
 
-## 3.9 Block Size 不是需要背诵的答案
+## 3.9 Block Size 的资源约束
 
 `256 threads/block` 是常用起点，不是硬件定律。Block size 同时影响：
 
@@ -285,9 +285,9 @@ block size 改变了哪些资源和访存行为，
 观察到的差异是否超过测量噪声？
 ```
 
-这也是性能工程和碰运气调参的分界。
+因此 block size 的选择应建立在可复现测量和资源分析上，而不能由单次结果决定。
 
-## 3.10 从最小闭环走向后续算子
+## 3.10 执行模型向复杂算子的扩展
 
 向量加法建立了一个可以逐层检查的闭环：
 
@@ -309,17 +309,13 @@ Tensor 元数据
 - Attention 增加多维索引、在线 softmax 和更复杂的访存；
 - Paged Attention 在地址计算中加入 block table。
 
-遇到复杂 kernel 时，先把它还原到这条链，再判断新增复杂性位于哪一层，调试会清楚得多。
+分析复杂 kernel 时，可先将其还原到这条调用链，再判断新增复杂性位于哪一层。
 
 ## 章末小结
 
-CUDA extension 并不是“Python 调用一段更快的 C++”。它是一条跨越对象模型、编译边界、运行时队列和并行硬件的调用链。向量加法的价值，是让这条链在没有复杂数学干扰时完整暴露。
+CUDA extension 是一条跨越对象模型、编译边界、运行时队列和并行硬件的调用链。向量加法排除了复杂数学的干扰，使这条调用链能够被逐层验证。
 
-本章最重要的三个区分是：
-
-- tensor 对象与底层数据地址不是同一概念；
-- thread 是编程抽象，warp 是重要的执行与性能单位；
-- 数值正确、CUDA 路径真实执行、性能测量可信是三份不同证据。
+理解 CUDA extension 需要保持三个层次上的区分。tensor 对象保存的是数据解释方式和存储引用，并不等同于底层数据地址；thread 是 CUDA 暴露的编程抽象，而 warp 是分析实际执行行为与性能的重要单位；数值结果正确、CUDA 路径确已执行和性能测量可信，则分别对应不同的验证证据，不能相互替代。
 
 ## 思考题
 
@@ -332,8 +328,10 @@ CUDA extension 并不是“Python 调用一段更快的 C++”。它是一条跨
 7. 如果 512 threads/block 比 256 慢，至少可以从哪些硬件资源角度提出假设？
 8. 把本章四层调用链映射到 RMSNorm：每一层需要新增什么约束？
 
-## 延伸阅读
+## 参考资料
 
-- NVIDIA CUDA C++ Programming Guide：执行层次、内存层次和异步模型。
-- PyTorch C++/CUDA Extension 文档：Tensor API、编译与 Python 绑定。
+- [NVIDIA CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html)：执行层次、内存层次和异步模型。
+- [NVIDIA CUDA C++ Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)：访存合并、计时与性能分析方法。
+- [PyTorch Custom C++ and CUDA Operators](https://docs.pytorch.org/tutorials/advanced/cpp_custom_ops.html)：自定义算子的官方集成路径。
+- [PyTorch torch.utils.cpp_extension](https://docs.pytorch.org/docs/stable/cpp_extension.html)：JIT 构建与加载接口。
 - 工程源码：[vector_add.cu](../../../kernels/vector_add.cu)、[harness.py](../../../course_vllm/kernels/harness.py) 与 [cuda_ops.py](../../../course_vllm/kernels/cuda_ops.py)。

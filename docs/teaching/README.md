@@ -15,7 +15,7 @@
 
 ### 第二篇：GPU 编程与核心算子
 
-- [第 3 章：一个 PyTorch Tensor 怎样走进 CUDA Kernel](part2_gpu_kernels/week03_cuda_extension.md)（教材化样章）
+- [第 3 章：PyTorch CUDA Extension 的执行模型](part2_gpu_kernels/week03_cuda_extension.md)（来源驱动样章）
 - [第 4 章：RMSNorm 与 RoPE](part2_gpu_kernels/week04_rmsnorm_rope.md)
 - [第 5 章：矩阵乘与 Linear](part2_gpu_kernels/week05_matmul_linear.md)
 - [第 6 章：Softmax、Sampling 与生成策略](part2_gpu_kernels/week06_softmax_sampling.md)
@@ -27,7 +27,7 @@
 
 - [第 8 章：KV Cache 是怎样工作的](part3_serving_engine/week08_kv_cache.md)
 - [第 9 章：一个请求如何穿过推理引擎](part3_serving_engine/week09_engine_request_lifecycle.md)
-- [第 10 章：Paged KV 与 Block Manager](part3_serving_engine/week10_paged_kv_block_manager.md)（教材化样章）
+- [第 10 章：Paged KV Cache 的地址映射与内存管理](part3_serving_engine/week10_paged_kv_block_manager.md)（来源驱动样章）
 - [第 11 章：Continuous Batching](part3_serving_engine/week11_continuous_batching.md)
 - [第 12 章：系统优化必须闭环](part3_serving_engine/week12_system_optimization.md)
 
@@ -51,10 +51,11 @@
 
 - [全书重构计划](BOOK_PLAN.md)：记录篇章目标、重写顺序和当前状态。
 - [讲义写作规范](STYLE_GUIDE.md)：规定章节结构、术语、公式、代码、图表和 PPT 素材规则。
+- [全书来源计划](references/source_plan.md)：记录每章优先采用的论文、官方文档和课程材料。
 - [图表素材目录](assets/README.md)：保存可复用于讲义和 PPT 的原始素材。
 - [旧稿资料映射](references/legacy_source_map.md)：仅用于追溯上一版资料来源，不约束新讲义结构。
 - [旧稿校验记录](archive/expanded_draft_validation_report.md)：记录保存提交中的统计结果，不代表新教材已经完成验收。
 
 ## 当前状态
 
-第 3 章和第 10 章是第一批教材化样章，分别验证“GPU 算子课”和“推理系统课”两种写法。其余章节暂时保留上一版正文作为素材，后续按 `BOOK_PLAN.md` 的依赖顺序重写。
+第 3 章和第 10 章是第一批来源驱动样章，分别验证“GPU 算子课”和“推理系统课”两种写法。两章以官方文档和原始论文支撑通用结论，以课程源码说明教学实现，并在相关论述之后就近给出链接。其余章节暂时保留上一版正文作为素材，后续按 `BOOK_PLAN.md` 的依赖顺序重写。

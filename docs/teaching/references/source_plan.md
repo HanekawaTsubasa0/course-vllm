@@ -1,0 +1,26 @@
+# 全书来源计划
+
+本文件记录各章的首轮资料基线。正文以原始论文、官方文档和官方教程为主要来源；课程工程源码用于说明本项目的实现，不替代上游机制定义。
+
+引用链接用于核查事实和追溯论证，不构成复制授权。编写时不得大段翻译或近似改写来源正文，也不直接搬用来源图表。每章应综合多个来源，重新完成中文叙述、数值算例、图示和代码分析。
+
+| 章 | 核心来源 | 在讲义中的用途 |
+| ---: | --- | --- |
+| 1 | [DistServe, OSDI 2024](https://www.usenix.org/system/files/osdi24-zhong-yinmin.pdf)；[vLLM Performance Dashboard](https://docs.vllm.ai/en/latest/benchmarking/dashboard/) | Prefill/decode、TTFT、TPOT、goodput 和指标口径 |
+| 2 | [CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)；[Nsight Systems](https://docs.nvidia.com/nsight-systems/)；[Nsight Compute](https://docs.nvidia.com/nsight-compute/NsightCompute/) | 异步计时、性能证据层次、Roofline 与 profiler |
+| 3 | [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/contents.html)；[CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)；[PyTorch Custom C++/CUDA Operators](https://docs.pytorch.org/tutorials/advanced/cpp_custom_ops.html) | CUDA 执行模型、访存、计时和 extension 接口 |
+| 4 | [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)；[RoFormer](https://arxiv.org/abs/2104.09864) | RMSNorm 定义、数值计算和 RoPE 位置编码 |
+| 5 | [NVIDIA CUTLASS: Efficient GEMM in CUDA](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html)；[CUTLASS GEMM API](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html) | GEMM 分层 tiling、数据搬运、寄存器累加和 epilogue |
+| 6 | [Hugging Face Generation Strategies](https://huggingface.co/docs/transformers/main/en/generation_strategies)；[PyTorch Softmax](https://pytorch.org/docs/stable/generated/torch.nn.functional.softmax.html) | 从 logits 到 token 的生成策略和 reference 语义 |
+| 7 | [Attention Is All You Need](https://arxiv.org/abs/1706.03762)；[FlashAttention](https://arxiv.org/abs/2205.14135)；[FlashAttention-2](https://arxiv.org/abs/2307.08691) | Attention 数学、IO-aware tiling 与 online softmax |
+| 8 | [PagedAttention, SOSP 2023](https://arxiv.org/abs/2309.06180)；[vLLM Cache Configuration](https://docs.vllm.ai/en/latest/api/vllm/config/cache/) | KV cache 增长、容量公式和显存约束 |
+| 9 | [vLLM 源码](https://github.com/vllm-project/vllm)；[Orca, OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu) | 请求、sequence、scheduler、model runner 与迭代执行 |
+| 10 | [PagedAttention, SOSP 2023](https://arxiv.org/abs/2309.06180)；[vLLM Paged Attention](https://docs.vllm.ai/en/latest/design/paged_attention/)；[vLLM Prefix Caching](https://docs.vllm.ai/en/latest/design/prefix_caching/) | Block table、按需分配、共享、引用计数和寻址开销 |
+| 11 | [Orca, OSDI 2022](https://www.usenix.org/conference/osdi22/presentation/yu)；[PagedAttention, SOSP 2023](https://arxiv.org/abs/2309.06180) | Iteration-level scheduling、continuous batching 和抢占 |
+| 12 | [CUDA Programming Guide: CUDA Graphs](https://docs.nvidia.com/cuda/cuda-programming-guide/index.html#cuda-graphs)；[CUDA Best Practices Guide](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) | Launch overhead、同步、数据传输、CUDA Graph 与证据闭环 |
+| 13 | [Megatron-LM](https://arxiv.org/abs/1909.08053)；[Efficient Large-Scale Language Model Training](https://arxiv.org/abs/2104.04473)；[vLLM Parallelism and Scaling](https://docs.vllm.ai/en/latest/serving/parallelism_scaling/) | Tensor/pipeline/data parallelism、通信和容量规划 |
+| 14 | [Ascend C 编程指南](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/850/opdevg/Ascendcopdevg/atlas_ascendc_map_10_0004.html)；[Ascend C 编程 API](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/80RC2alpha002/devguide/opdevg/ascendcopdevg/atlas_ascendc_10_0017.html) | CUDA 与 Ascend C 的编程模型对照；当前不开发实验 |
+| 15 | [DistServe](https://www.usenix.org/system/files/osdi24-zhong-yinmin.pdf)；[Sarathi-Serve](https://arxiv.org/abs/2403.02310)；[Speculative Decoding](https://arxiv.org/abs/2211.17192)；[vLLM Prefix Caching](https://docs.vllm.ai/en/latest/design/prefix_caching/) | 前沿机制的主张、系统状态、代价和评价方法 |
+| 16 | [MLPerf Inference](https://mlcommons.org/benchmarks/inference-datacenter/)；[vLLM Performance Dashboard](https://docs.vllm.ai/en/latest/benchmarking/dashboard/) | 可复现评测、claim-evidence matrix 和最终系统论证 |
+
+这份表是检索入口，不是自动引用清单。逐章重写时仍需阅读对应资料，确认版本、上下文和适用条件，再把链接放到具体论述附近。
